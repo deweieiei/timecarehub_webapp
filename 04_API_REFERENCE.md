@@ -1,13 +1,29 @@
 # 🔌 API Reference — TimeCareHub
 
+**อัปเดตล่าสุด:** 2026-07-17 — ตรงกับโค้ดจริงแล้ว
+
 **Base URL:** `http://192.168.1.35:8091`
-**รูปแบบ:** JSON ทั้งหมด (ยกเว้นอัปโหลดไฟล์ = `multipart/form-data`)
+**รูปแบบ:** JSON ทั้งหมด
 **Auth:** JWT ใน httpOnly cookie ชื่อ `tch_token` — เบราว์เซอร์ส่งให้เองอัตโนมัติ
 
-**ถ้าไม่ได้ล็อกอิน** ทุกเส้น (ยกเว้น register/login) ตอบ `401`
+**ถ้าไม่ได้ล็อกอิน** ทุกเส้น (ยกเว้น register/login/health) ตอบ `401`
 ```json
 { "error": "กรุณาเข้าสู่ระบบ" }
 ```
+
+## สารบัญ
+
+| กลุ่ม | ทำอะไร |
+|---|---|
+| [`/api/auth`](#-auth--apiauth) | สมัคร ล็อกอิน สลับบทบาท |
+| [`/api/profile`](#-profile--apiprofile) | 🆕 โปรไฟล์บัญชีผู้ใช้ (ชื่อ บัตร ปชช. ที่อยู่) |
+| [`/api/jobs`](#-jobs--apijobs) | งานแบบ**โพสหาคน** |
+| [`/api/caregivers`](#-caregivers--apicaregivers) | 🆕 ไดเรกทอรีแคร์กิฟเวอร์ |
+| [`/api/hires`](#-hires--apihires) | 🆕 งานแบบ**จ้างตรง** |
+| [`/api/kyc`](#-kyc--apikyc) | ⚠️ ยืนยันตัวตน (โหมดเดโม) + แอดมิน |
+| [`/api/chat`](#-chat--apichat) | แชท |
+| [`/api/notifications`](#-notifications--apinotifications) | 🆕 ตัวเลขแดงบนแท็บ |
+| [`/api/reviews`](#-reviews--apireviews-) | ⏸ ให้ดาว — **ปิดอยู่** |
 
 ---
 
@@ -34,11 +50,13 @@
 
 ### `POST /logout` → `{ "ok": true }`
 
-### `GET /me` — ข้อมูลตัวเอง
+### `GET /me` — ข้อมูลตัวเอง (หน้าเว็บเรียกตอนโหลดทุกหน้า)
 ```json
-{ "user": { "id": 2, "email": "cg@test.com", "full_name": "มานี", "active_role": "caregiver",
-            "is_admin": 0, "kyc_status": "approved", "rating_avg": "5.00", "rating_count": 1 } }
+{ "user": { "id": 2, "email": "cg@test.com", "full_name": "มานี", "phone": "081...",
+            "active_role": "caregiver", "is_admin": 0,
+            "kyc_status": "approved", "rating_avg": "0.00", "rating_count": 0 } }
 ```
+> ⚠️ **ไม่มี `national_id`** โดยตั้งใจ — เส้นนี้ถูกเรียกทุกหน้า ไม่ควรมีข้อมูลอ่อนไหวติดมา
 
 ### `POST /role` — สลับบทบาท
 ```json
@@ -47,26 +65,84 @@
 
 ---
 
+## 👤 Profile — `/api/profile` 🆕
+
+> ⚠️ **นี่คือ route เดียวในระบบที่ส่ง `national_id` ออกได้ และส่งให้เจ้าของบัญชีเท่านั้น**
+
+### `GET /me` — อ่านโปรไฟล์ตัวเอง
+```json
+{ "profile": {
+    "id": 5, "email": "care1@demo.com", "full_name": "สมหญิง ดูแลดี",
+    "title_prefix": "นางสาว", "nickname": "หญิง",
+    "birth_date": "1990-03-15", "age": 36,          ← ⭐ คำนวณสดจาก birth_date
+    "gender": "female", "nationality": "ไทย", "religion": "พุทธ",
+    "marital_status": "single", "blood_type": "O",
+    "national_id": "1101700123456",                  ← 🔒 เจ้าของเท่านั้น
+    "national_id_issue_date": "2020-01-01", "national_id_expiry_date": "2028-01-01",
+    "phone": "081-234-5601", "phone_alt": null, "line_id": null,
+    "addr_line": "123/45 ซอยลาดพร้าว 15", "addr_subdistrict": "จอมพล",
+    "addr_district": "จตุจักร", "addr_province": "กรุงเทพมหานคร", "addr_postcode": "10900",
+    "cur_same_as_addr": 1, "cur_addr_line": null, "...": null,
+    "emergency_name": "สมชาย ดูแลดี", "emergency_relation": "พี่ชาย", "emergency_phone": "0899999999",
+    "occupation": null, "education": null, "about_me": null,
+    "is_admin": 0, "active_role": "caregiver",
+    "created_at": "...", "profile_updated_at": "..."
+} }
+```
+
+### `PUT /me` — บันทึกโปรไฟล์ตัวเอง
+
+**ส่งมาแค่ช่องไหน อัปเดตแค่ช่องนั้น** — ไม่ต้องส่งครบทุกช่อง
+ส่งสตริงว่าง `""` = **ล้างค่าเป็น NULL**
+
+```json
+{ "national_id": "1-1017-00123-45-6", "birth_date": "1990-03-15", "gender": "female",
+  "addr_province": "กรุงเทพมหานคร", "emergency_phone": "0899999999" }
+```
+→ `{ "ok": true }`
+
+**ช่องที่แก้ได้** (allowlist — นอกเหนือจากนี้ถูกเมินเงียบ ๆ):
+`full_name` `title_prefix` `nickname` `birth_date` `gender` `nationality` `religion` `marital_status` `blood_type` `national_id` `national_id_issue_date` `national_id_expiry_date` `phone` `phone_alt` `line_id` `addr_*` `cur_same_as_addr` `cur_addr_*` `emergency_*` `occupation` `education` `about_me`
+
+> ### 🔒 ช่องที่ **แก้ไม่ได้** — โดยตั้งใจ
+> `id` · `email` · `password_hash` · **`is_admin`** · `active_role` · `created_at`
+> ยิง `{"is_admin":1}` มา = ถูกเมินทิ้ง ไม่ error ไม่ทำอะไร
+
+| Error | เมื่อไหร่ |
+|---|---|
+| `400` เลขบัตรประชาชนไม่ถูกต้อง — ต้องเป็นตัวเลข 13 หลักและผ่านการตรวจหลักสุดท้าย | เลขบัตรผิด checksum |
+| `400` ผู้ใช้ต้องมีอายุอย่างน้อย 15 ปี | `birth_date` ใหม่เกินไป |
+| `400` ชื่อ-นามสกุลว่างไม่ได้ | ส่ง `full_name: ""` |
+| `400` ค่าของ gender ไม่ถูกต้อง | ค่าไม่อยู่ใน ENUM |
+| `400` ไม่มีข้อมูลที่จะบันทึก | ไม่ส่งช่องที่แก้ได้มาเลย |
+
+**หมายเหตุ:**
+- เลขบัตรใส่ขีดคั่นมาได้ (`1-1017-00123-45-6`) ระบบถอดให้เอง เก็บเป็นตัวเลขล้วน
+- ตรวจ **หลักตรวจสอบ (checksum) ของบัตรไทยจริง ๆ** ไม่ใช่แค่นับ 13 หลัก
+
+---
+
 ## 💼 Jobs — `/api/jobs`
 
-### `POST /` — โพสงาน (ผู้ว่าจ้าง)
+> งานแบบ **"โพสหาคน"** (`hire_type='open'`) — ใครกดขอรับก็ได้ ผู้ว่าจ้างเลือกเอง
+> งานจ้างตรงอยู่ที่ [`/api/hires`](#-hires--apihires)
+
+### `POST /` — โพสงาน
 ```json
 {
   "title": "ต้องการคนดูแลคุณแม่ 78 ปี ช่วงกลางวัน",
   "care_type": "daily",            // hourly | daily | overnight | live_in
   "budget": 600,
   "budget_unit": "per_day",        // per_hour | per_day | per_month | total
-  "start_date": "2026-08-01",
-  "end_date": "2026-08-31",
+  "start_date": "2026-08-01", "end_date": "2026-08-31",
   "elder_condition": "เดินได้เอง ความจำไม่ดี เบาหวาน",
   "tasks": "ป้อนข้าว จัดยา พาเดินออกกำลัง",
   "lat": 13.8161, "lng": 100.5601,
-  "address": "123/45 ซอยลาดพร้าว 15 จตุจักร",   // เห็นเฉพาะคนผ่าน KYC
+  "address": "123/45 ซอยลาดพร้าว 15 จตุจักร",   // เห็นเฉพาะคนยืนยันตัวตนแล้ว
   "area_label": "ลาดพร้าว"                       // ทุกคนเห็นได้
 }
 ```
-→ `{ "ok": true, "id": 1 }`
-**บังคับ:** `title`, `budget`, `lat`, `lng`
+→ `{ "ok": true, "id": 1 }` — **บังคับ:** `title`, `budget`, `lat`, `lng`
 
 ---
 
@@ -77,9 +153,11 @@
 | `lat`, `lng` | ไม่ใส่ = เอางานล่าสุดทั้งหมด ไม่กรองระยะ |
 | `radius_km` | 20 (สูงสุด 100) |
 
+คืนเฉพาะงาน `status='open'` **และ** `hire_type='open'`
+
 **คำตอบขึ้นกับสถานะ KYC ของคนเรียก** — นี่คือหัวใจของระบบ
 
-**ผ่าน KYC แล้ว (`approved`):**
+**ยืนยันตัวตนแล้ว (`approved`):**
 ```json
 { "items": [{
     "id": 1, "title": "...", "budget": "600.00", "budget_unit": "per_day",
@@ -90,7 +168,7 @@
 }] }
 ```
 
-**ยังไม่ผ่าน KYC:**
+**ยังไม่ยืนยันตัวตน:**
 ```json
 { "items": [{
     "id": 1, "title": "...", "budget": "600.00",
@@ -104,19 +182,17 @@
 
 > หน้าเว็บดู `precise` แล้วตัดสินใจ: `true` → ปักหมุด, `false` → วาดวงกลม
 
----
-
 ### `GET /mine` — งานของฉัน (ทั้ง 2 บทบาท)
 ```json
 {
-  "posted":  [ /* งานที่ฉันโพส + applicant_count + caregiver_name */ ],
+  "posted":  [ /* งานที่ฉันโพส (hire_type='open') + applicant_count + caregiver_name */ ],
   "applied": [ /* งานที่ฉันกดขอรับ + my_application_status */ ]
 }
 ```
 
 ### `GET /:id` — รายละเอียดงาน 1 ตัว (ถูก mask เหมือนกัน)
 
-### `POST /:id/apply` — 🔒 กดขอรับงาน (**ต้อง KYC approved**)
+### `POST /:id/apply` — 🔒 กดขอรับงาน (**ต้องยืนยันตัวตนแล้ว**)
 ```json
 { "message": "สนใจครับ มีประสบการณ์ 5 ปี" }
 ```
@@ -130,79 +206,182 @@
 ### `GET /:id/applicants` — ดูผู้สมัคร (เจ้าของงานเท่านั้น)
 เรียงตามคะแนนดาวมาก → น้อย
 ```json
-{ "items": [{ "caregiver_id": 2, "full_name": "มานี", "rating_avg": "5.00", "rating_count": 1,
+{ "items": [{ "caregiver_id": 2, "full_name": "มานี", "phone": "081...",
+              "rating_avg": "0.00", "rating_count": 0,
               "experience_years": 5, "skills": "ผู้ช่วยพยาบาล", "bio": "...", "message": "..." }] }
 ```
 
 ### `POST /:id/choose/:caregiverId` — เลือกแคร์กิฟเวอร์
-งาน → `matched` | คนที่เลือก → `accepted` | คนอื่น → `rejected` (ทำใน transaction เดียว)
+งาน → `matched` | คนที่เลือก → `accepted` | คนอื่น → `rejected` (ทำใน transaction เดียว + `FOR UPDATE`)
 
 ### `POST /:id/complete` — ปิดงาน (เจ้าของงานเท่านั้น, ต้อง `matched` ก่อน)
 
 ---
 
+## 🧑‍⚕️ Caregivers — `/api/caregivers` 🆕
+
+> ไดเรกทอรีให้ผู้ว่าจ้างเดินดูโปรไฟล์แล้วจ้างตรงได้เลย — ไม่ต้องโพสงาน ไม่ต้องปักหมุด
+> ⭐ **แสดงเฉพาะคนที่ `kyc_status='approved'`** — คนที่ยังไม่ยืนยันตัวตนไม่โผล่เลย
+
+### `GET /?q=` — รายชื่อแคร์กิฟเวอร์
+`q` ค้นจาก ชื่อ / ทักษะ / ย่าน (ไม่ใส่ = เอาทั้งหมด) · เรียงตามประสบการณ์มาก→น้อย · สูงสุด 100 คน
+
+```json
+{ "items": [{ "id": 5, "full_name": "สมหญิง ดูแลดี",
+              "bio": "จบผู้ช่วยพยาบาล...", "experience_years": 5,
+              "skills": "ผู้ช่วยพยาบาล, จัดยา",
+              "area_label": "ลาดพร้าว", "lat": "13.8161000", "lng": "100.5601000",
+              "rate": "700.00", "rate_unit": "per_day" }] }
+```
+> ไม่โชว์ตัวเอง · **ไม่มี `national_id` / `email` / `phone`**
+
+### `GET /:id` — โปรไฟล์แคร์กิฟเวอร์ 1 คน
+→ `{ "caregiver": {...} }` | `404` ถ้าไม่มีคนนี้หรือยังไม่ approved
+
+---
+
+## 🤝 Hires — `/api/hires` 🆕
+
+> งานแบบ **"จ้างตรง"** (`hire_type='direct'`) — ผู้ว่าจ้างยิงตรงไปหาคนที่เลือก
+> เก็บในตาราง `jobs` เหมือนงานปกติ เพื่อให้แชท/ปิดงานใช้โค้ดชุดเดียวกัน
+
+```
+offered ──แคร์กิฟเวอร์กดรับ──→ matched ──ผู้จ้างปิดงาน──→ done
+     └──แคร์กิฟเวอร์ปฏิเสธ──→ declined
+```
+
+### `POST /` — ส่งคำขอจ้าง
+```json
+{ "caregiver_id": 5, "title": "ดูแลคุณแม่ช่วงกลางวัน",
+  "care_type": "daily", "budget": 700, "budget_unit": "per_day",
+  "start_date": "2026-08-01", "end_date": null,
+  "elder_condition": "...", "tasks": "...",
+  "address": "123/45 ซอยลาดพร้าว 15"   // เห็นเฉพาะแคร์กิฟเวอร์คนนี้เท่านั้น
+}
+```
+→ `{ "ok": true, "id": 6 }` — **บังคับ:** `caregiver_id`, `title`, `budget`
+**ไม่ต้องส่ง `lat`/`lng`** — งานจ้างตรงไม่ปักหมุด
+
+| Error | เมื่อไหร่ |
+|---|---|
+| `400` แคร์กิฟเวอร์คนนี้ยังไม่ได้ยืนยันตัวตน | เป้าหมายไม่ใช่ `approved` |
+| `409` คุณส่งคำขอจ้างคนนี้ไปแล้ว กำลังรอเขาตอบอยู่ | มีคำขอ `offered` ค้างอยู่กับคู่เดิม |
+| `400` จ้างตัวเองไม่ได้ | |
+
+### `GET /incoming` — คำขอจ้างที่ส่งมาหาฉัน (ฝั่งแคร์กิฟเวอร์)
+เรียง `offered` → `matched` → `done` → `declined`
+```json
+{ "items": [{ "id": 6, "title": "...", "status": "offered", "budget": "700.00",
+              "employer_name": "วิภา อ่อนโยน", "employer_phone": "081...",
+              "address": "...", "elder_condition": "...", "tasks": "..." }] }
+```
+
+### `GET /sent` — คำขอจ้างที่ฉันส่งไป (ฝั่งผู้ว่าจ้าง)
+```json
+{ "items": [{ "id": 6, "title": "...", "status": "offered",
+              "caregiver_name": "สมหญิง ดูแลดี", "target_caregiver_id": 5 }] }
+```
+
+### `POST /:id/respond` — ตอบรับ / ปฏิเสธ (คนที่ถูกส่งคำขอไปหาเท่านั้น)
+```json
+{ "decision": "accept" }    // หรือ "decline"
+```
+→ `{ "ok": true, "status": "matched" }` | `{ "ok": true, "status": "declined" }`
+
+| Error | เมื่อไหร่ |
+|---|---|
+| `403` คำขอนี้ไม่ได้ส่งถึงคุณ | ไม่ใช่ `target_caregiver_id` |
+| `400` คำขอนี้ตอบไปแล้ว | status ≠ `offered` |
+
+> **ปิดงานจ้างตรง** ใช้ `POST /api/jobs/:id/complete` เส้นเดียวกับงานโพส
+
+---
+
 ## 🪪 KYC — `/api/kyc`
 
-### `GET /me` — สถานะ KYC ของฉัน
+> ### ⚠️ ตอนนี้เป็น **โหมดเดโม** — กดปุ่มเดียวผ่านทันที ไม่มีอัปโหลด ไม่มีคิวแอดมิน
+> ของเดิมที่ออกแบบไว้: อัปบัตร ปชช. + เซลฟี่ → เข้าคิว → แอดมินอนุมัติ
+> คอลัมน์ `kyc_id_card` / `kyc_selfie` ยังอยู่ครบใน DB → เปิดกลับได้ทันที
+
+### `GET /me` — สถานะ + โปรไฟล์ฝั่งรับงานของฉัน
 ```json
-{ "kyc_status": "pending", "kyc_note": null, "bio": "...", "experience_years": 5,
-  "skills": "...", "rating_avg": "0.00", "has_id_card": true, "has_selfie": true }
+{ "kyc_status": "approved", "bio": "...", "experience_years": 5, "skills": "...",
+  "area_label": "ลาดพร้าว", "rate": "700.00", "rate_unit": "per_day" }
 ```
 
-### `POST /submit` — ส่งเอกสาร (`multipart/form-data`)
-
-| field | ชนิด |
-|---|---|
-| `id_card` | ไฟล์รูป — บัตรประชาชน |
-| `selfie` | ไฟล์รูป — เซลฟี่คู่บัตร |
-| `bio` / `experience_years` / `skills` | ข้อความ |
-
-รับ JPG/PNG/WEBP ไม่เกิน 5 MB → `{ "ok": true, "kyc_status": "pending" }`
-> ส่งซ้ำได้ถ้าโดน `rejected` (แนบใหม่แค่ใบเดียวก็ได้ ใบเดิมยังอยู่)
-
-### `GET /queue` — 🔒 คิวรออนุมัติ (**แอดมินเท่านั้น**)
-
-### `GET /file/:userId/:kind` — 🔒 ดูรูปเอกสาร (**แอดมินเท่านั้น**)
-`:kind` = `id_card` | `selfie` → ส่งไฟล์รูปกลับ
-> คนอื่นเรียก = `403` — ไฟล์เก็บนอก `public/` เข้า URL ตรงไม่ได้
-
-### `POST /review/:userId` — 🔒 อนุมัติ/ปฏิเสธ (**แอดมินเท่านั้น**)
+### `POST /verify` — ⭐ ยืนยันตัวตน (กดปุ่มเดียว) + บันทึกโปรไฟล์ฝั่งรับงาน
 ```json
-{ "decision": "approved" }
-{ "decision": "rejected", "note": "รูปบัตรเบลอ อ่านเลขไม่ออก" }
+{ "bio": "...", "experience_years": 5, "skills": "ผู้ช่วยพยาบาล, จัดยา",
+  "area_label": "ลาดพร้าว", "rate": 700, "rate_unit": "per_day" }
 ```
+→ `{ "ok": true, "kyc_status": "approved" }`
+
+> ข้อมูลชุดนี้คือสิ่งที่**ผู้ว่าจ้างเห็นในไดเรกทอรี** `/api/caregivers`
+
+### `GET /caregivers` — 🔒 รายชื่อแคร์กิฟเวอร์ทั้งหมด + สถานะ (**แอดมินเท่านั้น**)
+```json
+{ "items": [{ "id": 5, "full_name": "...", "email": "...", "phone": "...",
+              "kyc_status": "approved", "experience_years": 5,
+              "rating_avg": "0.00", "rating_count": 0, "applied_count": 2 }] }
+```
+
+### `POST /revoke/:userId` — 🔒 เพิกถอนการยืนยันตัวตน (**แอดมินเท่านั้น**)
+→ `kyc_status = 'none'` — คนนั้นจะกดขอรับงานไม่ได้ เห็นแค่ตำแหน่งคร่าว ๆ และหายจากไดเรกทอรี
 
 ---
 
 ## 💬 Chat — `/api/chat`
 
-### `GET /threads` — ห้องแชทของฉัน
+### `GET /threads` — ห้องแชทของฉัน (รวมทั้งงานโพสและงานจ้างตรง)
 ```json
-{ "items": [{ "job_id": 1, "title": "...", "other_id": 2, "other_name": "มานี",
-              "last_message": "ขอ 600 บาท/วัน ได้ไหมคะ", "last_at": "..." }] }
+{ "items": [{ "job_id": 1, "title": "...", "status": "open", "hire_type": "open",
+              "other_id": 2, "other_name": "มานี",
+              "last_message": "ขอ 600 บาท/วัน ได้ไหมคะ", "last_at": "...",
+              "unread": 2 }] }
 ```
 
 ### `GET /:jobId?with=<userId>` — อ่านข้อความ
-> `with` จำเป็นเฉพาะฝั่งผู้ว่าจ้าง (เพราะคุยกับหลายคนในงานเดียวได้)
-> ฝั่งแคร์กิฟเวอร์ไม่ต้องใส่ — ระบบรู้ว่าคู่สนทนาคือเจ้าของงาน
+> `with` จำเป็นเฉพาะฝั่งผู้ว่าจ้างของ**งานโพส** (เพราะคุยกับหลายคนในงานเดียวได้)
+> งานจ้างตรงไม่ต้องใส่ — ระบบรู้คู่สนทนาจาก `target_caregiver_id`
 
 ```json
-{ "items": [{ "id": 1, "sender_id": 2, "body": "สวัสดีครับ", "created_at": "..." }],
+{ "items": [{ "id": 1, "sender_id": 2, "receiver_id": 1, "body": "สวัสดีครับ", "created_at": "..." }],
   "me": 2, "other_id": 1 }
 ```
+> **เรียกเส้นนี้ = ข้อความของคู่นี้ถูกมาร์คว่าอ่านแล้ว** (`read_at = NOW()`) → ตัวเลขแดงหาย
 
 ### `POST /:jobId` — ส่งข้อความ
 ```json
-{ "body": "ว่างวันจันทร์-ศุกร์ครับ", "to": 2 }   // "to" จำเป็นเฉพาะฝั่งผู้ว่าจ้าง
+{ "body": "ว่างวันจันทร์-ศุกร์ครับ", "to": 2 }   // "to" จำเป็นเฉพาะฝั่งผู้ว่าจ้างของงานโพส
 ```
 | Error | เมื่อไหร่ |
 |---|---|
-| `403` ต้องกดขอรับงานนี้ก่อนจึงจะคุยได้ | แคร์กิฟเวอร์ที่ไม่ได้สมัครงานนี้ |
+| `403` ต้องกดขอรับงานนี้ก่อนจึงจะคุยได้ | แคร์กิฟเวอร์ที่ไม่ได้สมัครงานโพสนั้น |
 | `403` คนนี้ไม่ได้กดขอรับงานนี้ | ผู้ว่าจ้างส่งหาคนที่ไม่ได้สมัคร |
+| `403` งานนี้ไม่ได้ส่งถึงคุณ | งานจ้างตรงที่ไม่ใช่เป้าหมาย |
+| `400` พิมพ์ข้อความก่อนส่ง | body ว่าง |
 
 ---
 
-## ⭐ Reviews — `/api/reviews`
+## 🔔 Notifications — `/api/notifications` 🆕
+
+### `GET /` — ตัวเลขแดงบนแท็บ (หน้าเว็บเรียกทุก 15 วินาที)
+```json
+{ "chat": 3, "applicants": 1, "offers": 2 }
+```
+
+| ค่า | นับอะไร | ไปโผล่ที่แท็บ |
+|---|---|---|
+| `chat` | ข้อความที่ส่งมาหาฉันและยังไม่อ่าน (`read_at IS NULL`) | แชท |
+| `applicants` | คนที่มากดขอรับงานที่ฉันโพส และฉันยังไม่ได้เลือกใคร | งานของฉัน (ฝั่งผู้จ้าง) |
+| `offers` | คำขอจ้างตรงที่ส่งมาหาฉัน ยังไม่ได้ตอบ | งานของฉัน (ฝั่งแคร์กิฟเวอร์) |
+
+---
+
+## ⭐ Reviews — `/api/reviews` ⏸
+
+> ### **ปิดอยู่** — `server.js` คอมเมนต์ `app.use('/api/reviews', ...)` ไว้
+> เรียกเส้นพวกนี้ตอนนี้จะได้ `404` (Express ไม่รู้จัก) — โค้ดกับตารางยังอยู่ครบ เอาคอมเมนต์ออกก็กลับมาทันที
 
 ### `POST /:jobId` — ให้ดาว
 ```json
@@ -214,8 +393,6 @@
 | `409` คุณให้ดาวงานนี้ไปแล้ว | ให้ซ้ำ |
 | `403` คุณไม่ได้เกี่ยวข้องกับงานนี้ | ไม่ใช่คู่ในงาน |
 
-ให้แล้ว → `caregiver_profiles.rating_avg` / `rating_count` อัปเดตอัตโนมัติ
-
 ### `GET /user/:userId` — ดูรีวิวของคนนั้น (ล่าสุด 50 รายการ)
 
 ---
@@ -224,3 +401,4 @@
 ```json
 { "ok": true, "service": "timecarehub" }
 ```
+> ไม่ต้องล็อกอิน — ใช้เช็คว่า app ยังไม่ตาย
