@@ -46,6 +46,23 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// อ่าน token จาก header cookie ดิบ ๆ → คืน user id (null = ไม่ผ่าน)
+// มีไว้ให้ Socket.IO ใช้ตอน handshake — มันไม่ได้วิ่งผ่าน cookie-parser เหมือน route ปกติ
+function userIdFromCookieHeader(header) {
+  const hit = String(header || '')
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${COOKIE}=`));
+  if (!hit) return null;
+
+  try {
+    const token = decodeURIComponent(hit.slice(COOKIE.length + 1));
+    return jwt.verify(token, process.env.JWT_SECRET).id;
+  } catch {
+    return null;
+  }
+}
+
 function requireAdmin(req, res, next) {
   if (!req.user?.is_admin) return res.status(403).json({ error: 'เฉพาะแอดมินเท่านั้น' });
   next();
@@ -62,4 +79,11 @@ function requireApprovedCaregiver(req, res, next) {
   next();
 }
 
-module.exports = { setAuthCookie, clearAuthCookie, requireAuth, requireAdmin, requireApprovedCaregiver };
+module.exports = {
+  setAuthCookie,
+  clearAuthCookie,
+  requireAuth,
+  requireAdmin,
+  requireApprovedCaregiver,
+  userIdFromCookieHeader,
+};

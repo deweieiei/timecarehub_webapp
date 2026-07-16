@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cookieParser = require('cookie-parser');
+const http = require('http');
 const path = require('path');
 
 const app = express();
@@ -31,8 +32,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, req, res, next) => {
   console.error(err);
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ error: 'ไฟล์ใหญ่เกิน 5 MB' });
+    return res.status(400).json({ error: 'ไฟล์ใหญ่เกิน 8 MB' });
   }
+  // err.status = ตั้งใจปัดตกเอง (ผู้ใช้ส่งของผิด) → อย่าตอบ 500 ให้เขาคิดว่าระบบพัง
+  if (err.status) return res.status(err.status).json({ error: err.message });
   res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในระบบ' });
 });
 
@@ -41,6 +44,12 @@ const PORT = Number(process.env.PORT || 8091);
 // HOST=0.0.0.0 → เปิดให้เข้าตรงทาง LAN ได้ (http://192.168.1.35:8091) สะดวกตอนเดโม
 // HOST=127.0.0.1 → ปิดวง LAN บังคับให้เข้าผ่าน nginx (HTTPS) อย่างเดียว — ปลอดภัยกว่า ใช้ตอนขึ้นจริง
 const HOST = process.env.HOST || '0.0.0.0';
-app.listen(PORT, HOST, () => {
-  console.log(`TimeCareHub รันอยู่ที่ http://${HOST}:${PORT}`);
+
+// ต้องสร้าง http server เองแทน app.listen() เพราะ Socket.IO ขอเกาะตัวเดียวกันกับ Express
+// (ใช้พอร์ต 8091 ร่วมกัน ไม่ได้เปิดพอร์ตใหม่ → nginx กับ firewall ไม่ต้องแก้อะไรเลย)
+const server = http.createServer(app);
+require('./src/realtime').init(server);
+
+server.listen(PORT, HOST, () => {
+  console.log(`TimeCareHub รันอยู่ที่ http://${HOST}:${PORT} (แชทสดผ่าน Socket.IO)`);
 });

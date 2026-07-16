@@ -441,6 +441,28 @@ input[type=file] { padding: 10px; font-size: 14px; }
 .thread-body { flex: 1; min-width: 0; }
 .thread-body strong { display: block; font-size: 15px; }
 .thread-body small { display: block; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thread-last { color: var(--ink); opacity: .7; }
+.thread-last.unread { opacity: 1; font-weight: 600; }
+
+/* จุดออนไลน์ — เกาะมุมล่างขวาของรูปโปรไฟล์ */
+.thread-avatar { position: relative; flex-shrink: 0; }
+.presence-dot {
+  position: absolute; right: -1px; bottom: -1px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #c3cad2;                 /* เทา = ออฟไลน์ */
+  border: 2px solid #fff;
+  transition: background .2s;
+}
+.presence-dot.on { background: var(--green); }
+
+/* เวลา + เลขข้อความใหม่ ด้านขวาของรายการห้อง */
+.thread-side { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.thread-side time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.thread-badge {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--red); color: #fff; font-size: 11px; font-weight: 700;
+  display: grid; place-items: center;
+}
 
 /* ห้องแชท — เปิดทับเต็มจอ */
 .chat-room { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 900; }
@@ -451,21 +473,50 @@ input[type=file] { padding: 10px; font-size: 14px; }
 .chat-head .avatar { width: 38px; height: 38px; font-size: 15px; }
 .chat-head strong { font-size: 16px; display: block; }
 .chat-head small { font-size: 12px; opacity: .8; }
+.chat-head .presence-dot { width: 11px; height: 11px; border-color: var(--teal-dark); }
+.chat-head small.typing { opacity: 1; font-style: italic; }
 .chat-msgs {
   flex: 1; overflow-y: auto; padding: 16px;
   display: flex; flex-direction: column; gap: 8px;
   width: 100%; max-width: var(--content); margin: 0 auto;
 }
+.chat-hint { text-align: center; color: var(--muted); font-size: 14px; margin-top: 20px; }
 .msg { max-width: 78%; padding: 10px 14px; border-radius: 18px; font-size: 15px; word-break: break-word; }
 .msg.them { background: #fff; align-self: flex-start; border-bottom-left-radius: 5px; box-shadow: 0 1px 2px rgba(0,0,0,.07); }
 .msg.me { background: var(--teal); color: #fff; align-self: flex-end; border-bottom-right-radius: 5px; }
-.msg time { display: block; font-size: 10.5px; opacity: .65; margin-top: 3px; }
+.msg-text { white-space: pre-wrap; }   /* ขึ้นบรรทัดใหม่ที่พิมพ์มา ต้องไม่หายไป */
+
+/* เวลา + ติ๊กสถานะ ท้ายฟอง */
+.msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 3px; }
+.msg-meta time { font-size: 10.5px; opacity: .65; }
+.ticks { display: inline-flex; opacity: .7; }
+.ticks svg { width: 14px; height: 14px; }
+.ticks.pending svg { width: 11px; height: 11px; }
+.ticks.read { opacity: 1; color: #7fe3f0; }   /* ฟ้าสว่างบนพื้นเขียว = อ่านแล้ว เห็นชัดกว่าขาวจาง */
+
+/* รูปในแชท — ฟองหุ้มรูปไม่ต้องมีขอบใน ให้รูปเต็มฟองไปเลย */
+.msg.has-img { padding: 4px 4px 6px; max-width: 260px; }
+.msg.has-img .msg-meta { padding: 0 8px; }
+.msg-img {
+  display: block; width: 100%; border-radius: 14px;
+  background: rgba(0,0,0,.05);   /* พื้นเทาจาง ๆ ระหว่างรอรูปโหลด */
+  /* รูปแนวตั้งจากมือถือสูงมาก ถ้าไม่คุมไว้ ฟองเดียวกินจอทั้งหน้า
+     → ตัดให้พอดีตา (object-fit: cover) แล้วกดดูเต็ม ๆ ในแท็บใหม่เอา */
+  max-height: 360px; object-fit: cover; cursor: pointer;
+}
+
 .chat-input {
-  display: flex; gap: 8px; padding: 12px; justify-content: center;
+  display: flex; gap: 8px; padding: 12px; justify-content: center; align-items: center;
   padding-bottom: calc(12px + env(safe-area-inset-bottom));
   background: #fff; border-top: 1px solid var(--line); flex-shrink: 0;
 }
 .chat-input input { border-radius: 999px; max-width: 660px; }
+.chat-input .attach {
+  color: var(--teal); width: 42px; height: 42px; flex-shrink: 0;
+  display: grid; place-items: center; border-radius: 50%;
+}
+.chat-input .attach:hover { background: var(--teal-light); }
+.chat-input .attach svg { width: 23px; height: 23px; }
 .chat-input .btn { border-radius: 50%; width: 48px; height: 48px; padding: 0; flex-shrink: 0; }
 .chat-input .btn svg { width: 20px; height: 20px; }
 

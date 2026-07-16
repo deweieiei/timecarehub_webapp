@@ -43,6 +43,38 @@ ssh server_live@192.168.1.35 "cd ~/timecarehub && git pull && pm2 restart timeca
 
 **จบแค่นั้น** — ไม่ต้อง `scp` ทีละไฟล์อีกแล้ว
 
+> ### 🔴 ยกเว้นรอบที่ **มี dependency ใหม่** หรือ **มีไฟล์ `.sql` ใหม่**
+> คำสั่งข้างบน **ไม่พอ** — แอพจะพังตอน restart (`Cannot find module 'socket.io'`) หรือ query ล้ม (`Unknown column 'kind'`)
+> ต้องเติม `npm install` และ `npm run migrate` เข้าไปด้วย:
+>
+> ```bash
+> ssh server_live@192.168.1.35 "cd ~/timecarehub && git pull && cd TimecareHub && npm install && npm run migrate && pm2 restart timecarehub-8091"
+> ```
+>
+> **🆕 รอบยกเครื่องแชท (2026-07-17) เข้าเงื่อนไขนี้ทั้ง 2 ข้อ** — มี `socket.io` ตัวใหม่ + `db/004_chat_upgrade.sql`
+> คำสั่งยาวอันนี้ **สั่งซ้ำได้ปลอดภัย** (`npm install` ที่ไม่มีอะไรใหม่ = ไม่ทำอะไร · `migrate` ข้ามของที่มีอยู่แล้ว)
+> — ถ้าไม่แน่ใจว่ารอบไหนต้องใช้อันไหน **ใช้อันยาวไปเลยก็ได้ ไม่เสียหาย**
+
+#### ✅ เช็คหลัง deploy รอบแชท
+
+```bash
+# 1. แอพขึ้นจริง + Socket.IO ติด (ต้องได้ 200 ทั้งคู่)
+curl -s -o /dev/null -w "health=%{http_code}\n"    http://127.0.0.1:8091/api/health
+curl -s -o /dev/null -w "socket.io=%{http_code}\n" http://127.0.0.1:8091/socket.io/socket.io.js
+
+# 2. คอลัมน์ใหม่มาครบ (ต้องเห็น kind · image_path · image_w · image_h)
+mysql -u timecarehub -p timecarehub -e "DESCRIBE messages;"
+
+# 3. ไม่มี error ค้าง
+pm2 logs timecarehub-8091 --lines 30 --nostream
+```
+
+**ทดสอบของจริง:** เปิด 2 เบราว์เซอร์ (ปกติ + ไม่ระบุตัวตน) ล็อกอินคนละฝั่ง เปิดห้องแชทเดียวกัน
+→ พิมพ์ฝั่งหนึ่ง **อีกฝั่งต้องเด้งทันทีโดยไม่ต้องกดรีเฟรช** · ติ๊กต้องเปลี่ยนเป็น ✓✓ ตอนอีกฝั่งเปิดอ่าน
+
+> **ถ้าข้อความไม่เด้ง แต่กดรีเฟรชแล้วเห็น** = socket ต่อไม่ติด → เปิด DevTools ดู console
+> (ตัวส่งข้อความมีทางสำรองเป็น REST จึงยังส่งได้อยู่ แต่ออนไลน์/กำลังพิมพ์/ติ๊กสด จะไม่ทำงาน)
+
 > **แก้แค่หน้าเว็บ** (HTML/CSS/JS ใน `public/`) → **ไม่ต้อง `pm2 restart`** Express เสิร์ฟไฟล์สด กด refresh เห็นเลย
 > ```bash
 > ssh server_live@192.168.1.35 "cd ~/timecarehub && git pull"
@@ -67,6 +99,18 @@ ssh server_live@192.168.1.35 "cd ~/timecarehub && git pull && cd TimecareHub && 
 | `schema.sql` | ตารางหลัก 6 ตาราง (`CREATE TABLE IF NOT EXISTS`) |
 | `002_direct_hire.sql` | เพิ่มระบบจ้างตรง — `hire_type`, `target_caregiver_id`, `messages.read_at` |
 | `003_user_profile.sql` | เพิ่มโปรไฟล์บัญชีผู้ใช้ 31 คอลัมน์ใน `users` |
+| 🆕 `004_chat_upgrade.sql` | รูปในแชท (`messages.kind` · `image_path` · `image_w/h`) + `users.last_seen_at` |
+
+> ### 🐛 `npm run migrate` บน **DB เปล่า** ยังพังอยู่ (บั๊กเก่า ยังไม่ได้แก้)
+> `migrate.js` เรียงไฟล์ตามชื่อ → ตัวเลขมาก่อนตัวอักษร → **`schema.sql` ถูกรันเป็นไฟล์สุดท้าย**
+> เจอตอนตั้ง DB ใหม่จากศูนย์: `002` จะล้มเพราะ *"Table 'jobs' doesn't exist"*
+>
+> **DB บน server ไม่กระทบ** (ตารางมีครบอยู่แล้ว migrate จึงข้ามให้หมด) — เจอเฉพาะตอนสร้าง DB ใหม่
+> **วิธีเลี่ยงตอนนี้:** ยัด `schema.sql` เข้าไปเองก่อน แล้วค่อย migrate
+> ```bash
+> mysql -u timecarehub -p timecarehub < TimecareHub/db/schema.sql && cd TimecareHub && npm run migrate
+> ```
+> **วิธีแก้ถาวร:** เปลี่ยนชื่อ `schema.sql` → `001_schema.sql` (ยังไม่ได้ทำ — รอพี่ดิวเคาะ)
 
 > ⚠️ **อย่าแก้ไฟล์ `.sql` เก่าที่รันไปแล้ว** — server รันไปแล้วมันจะไม่รันซ้ำให้
 > ถ้าจะเปลี่ยนอะไร ให้เขียนไฟล์ `ALTER TABLE` ใหม่เป็นเลขถัดไป

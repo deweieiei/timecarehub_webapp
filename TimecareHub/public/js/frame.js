@@ -44,6 +44,11 @@ const ICONS = {
   logout: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
   back: svg('<polyline points="15 18 9 12 15 6"/>', 2.2),
   send: svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>'),
+  photo: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><polyline points="21 15 16 10 5 19"/>'),
+  // ติ๊กสถานะข้อความ: นาฬิกา = กำลังส่ง · ติ๊ก 1 = ส่งแล้ว · ติ๊ก 2 = อ่านแล้ว
+  clock: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>', 2.2),
+  tick: svg('<polyline points="4 12.5 9 17.5 20 6.5"/>', 2.6),
+  ticks: svg('<polyline points="2 12.5 7 17.5 17.5 6.5"/><polyline points="10.5 15.5 12.5 17.5 23 6.5"/>', 2.6),
   empty: svg('<rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/>'),
   briefcase: svg('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
   browse: svg('<circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.3 2.7-5.4 6-5.4s6 2.1 6 5.4"/><circle cx="18" cy="9" r="2.4"/><path d="M17 14.8c2.4.3 4 2.2 4 5.2"/>'),
@@ -162,6 +167,10 @@ async function buildFrame({ role, tabs = [], render = {} } = {}) {
     }
   });
 
+  // แชทสด — เปิดท่อ socket ทิ้งไว้ตั้งแต่เข้าหน้า ไม่ต้องรอเปิดแท็บแชท
+  // (หน้าที่ไม่ได้โหลด chat.js เช่น profile/admin จะไม่มีฟังก์ชันนี้ — ข้ามไป)
+  if (typeof initRealtime === 'function') initRealtime();
+
   if (tabs.length) {
     $('#nav').innerHTML = tabs
       .map(([k, label]) => `
@@ -207,8 +216,7 @@ async function refreshBadges() {
 
 function go(tab, render) {
   TAB = tab;
-  stopChatPolling();
-  closeChatRoom();
+  closeChat();
   view.scrollTop = 0;
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   render[tab]();

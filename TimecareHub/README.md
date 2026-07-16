@@ -45,18 +45,21 @@ Auth     : JWT ใน httpOnly cookie + bcrypt
 
 ```
 TimecareHub/
-├── server.js              จุดเริ่มต้น (Express, port 8091)
+├── server.js              จุดเริ่มต้น (Express + Socket.IO เกาะพอร์ต 8091 ร่วมกัน)
 ├── .env                   รหัส DB + JWT secret — 🔴 ไม่อยู่บน git มีที่เดียวบน server
 ├── db/
 │   ├── schema.sql         ตารางหลัก 6 ตาราง
 │   ├── 002_direct_hire.sql   เพิ่มระบบจ้างตรง
 │   ├── 003_user_profile.sql  เพิ่มโปรไฟล์ผู้ใช้ 31 คอลัมน์
+│   ├── 004_chat_upgrade.sql  🆕 รูปในแชท + last_seen_at
 │   ├── migrate.js         npm run migrate — รันไฟล์ .sql เรียงตามชื่อ ข้ามอันที่มีแล้ว
 │   └── seed.js            npm run seed — แคร์กิฟเวอร์ตัวอย่าง 5 คน
 ├── src/
-│   ├── db.js              MySQL pool
+│   ├── db.js              MySQL pool — ⚠️ SET time_zone='+00:00' อย่าลบ (อ่านหมายเหตุในไฟล์)
 │   ├── auth.js            JWT + middleware เช็คสิทธิ์
 │   ├── geo.js             ⭐ ตรรกะเปิดเผยพิกัด 2 ระดับ
+│   ├── chat-core.js       🆕⭐ เช็คสิทธิ์แชทที่เดียวจบ — REST กับ socket เรียกตัวเดียวกัน
+│   ├── realtime.js        🆕 Socket.IO — ข้อความสด · ออนไลน์ · กำลังพิมพ์ · อ่านแล้ว
 │   └── routes/            auth · profile · jobs · caregivers · hires · kyc · chat · notifications · reviews(⏸)
 ├── public/
 │   ├── index.html         เข้าสู่ระบบ / สมัคร
@@ -66,7 +69,9 @@ TimecareHub/
 │   ├── profile.html       โปรไฟล์บัญชีผู้ใช้
 │   ├── admin.html         หน้าแอดมิน
 │   └── js/                frame(กรอบร่วม) · employer · caregiver · chat · profile
-└── uploads/kyc/           รูปบัตร ปชช. — 🔴 ไม่อยู่บน git · อยู่นอก public/ เข้า URL ตรงไม่ได้
+└── uploads/               🔴 ไม่อยู่บน git · อยู่นอก public/ เข้า URL ตรงไม่ได้
+    ├── kyc/               รูปบัตร ปชช. (ตอนนี้ KYC เป็นโหมดเดโม ยังไม่มีไฟล์ลง)
+    └── chat/<job_id>/     🆕 รูปในแชท — ต้องผ่าน GET /api/chat/image/:id ที่เช็คสิทธิ์ก่อน
 ```
 
 ---
@@ -126,16 +131,21 @@ mysql -u timecarehub -p timecarehub -e "UPDATE users SET is_admin=1 WHERE email=
 
 | เรื่อง | รายละเอียด |
 |---|---|
-| **KYC เป็นโหมดเดโม** | `src/routes/kyc.js` — กดปุ่มเดียวผ่าน ไม่มี multer ไม่มีคิวแอดมิน<br>⭐ แต่ `kyc_status` ยังคุม GPS 2 ระดับเหมือนเดิม · คอลัมน์ `kyc_id_card`/`kyc_selfie` ยังอยู่ครบ |
+| **KYC เป็นโหมดเดโม** | `src/routes/kyc.js` — กดปุ่มเดียวผ่าน ไม่มีคิวแอดมิน<br>⭐ แต่ `kyc_status` ยังคุม GPS 2 ระดับเหมือนเดิม · คอลัมน์ `kyc_id_card`/`kyc_selfie` ยังอยู่ครบ |
 | **รีวิวปิดอยู่** | `server.js` คอมเมนต์ `app.use('/api/reviews', ...)` ไว้ — เอาคอมเมนต์ออกก็กลับมา |
 | **`national_id` อ่อนไหวมาก** | `/api/profile` เป็น route เดียวที่ส่งออกได้ (เจ้าของบัญชีเท่านั้น)<br>**route อื่นห้าม `SELECT u.*`** ต้องระบุคอลัมน์เอง |
 | **`STATUS_TH` ต้องครบ 6 ค่า** | `frame.js` — ขาดตัวไหน ป้ายขึ้น `undefined` (เคยพลาดมาแล้วกับ `offered`/`declined`) |
 | **`.env` ลบแล้วจบ** | ไม่อยู่บน git ไม่มีที่อื่น — สำรองก่อนแตะโฟลเดอร์เสมอ |
+| 🆕 **เช็คสิทธิ์แชทมีที่เดียว** | `src/chat-core.js` — ทั้ง REST และ socket เรียกตัวเดียวกัน<br>**ห้ามเขียนเช็คซ้ำที่อื่น** ไม่งั้นวันหนึ่งเช็คไม่ตรงกัน แล้วรูหลุดจะโผล่ทางที่ลืมแก้ |
+| 🆕 **ทะเบียนออนไลน์อยู่ใน RAM** | `src/realtime.js` — ใช้ได้เพราะ pm2 รัน **fork โปรเซสเดียว**<br>เปลี่ยนเป็น cluster เมื่อไหร่ **จุดเขียวเพี้ยนทันที** ต้องย้ายไป Redis |
+| 🆕 **`SET time_zone` ใน `db.js`** | อย่าลบ — เคยทำเวลาทุกที่ในเว็บล้ำหน้าไป **7 ชม.** มาแล้ว |
+| 🆕 **รูปแชทต้องเช็คสิทธิ์ก่อน multer** | ด่านตรวจอยู่ก่อน multer เสมอ ไม่งั้นคนไม่มีสิทธิ์ยัดไฟล์ขึ้น server ได้ก่อนโดนปฏิเสธ<br>→ คู่สนทนาส่งมาทาง `?with=` ไม่ใช่ใน body (multipart อ่าน body ตอนนั้นไม่ได้) |
 
 ## ยังไม่มี
 
 - ❌ จ่ายเงินในระบบ / escrow — จ่ายกันเองนอกแอพ
-- ❌ Push notification จริง (มีแค่ตัวเลขแดงบนแท็บ poll ทุก 15 วิ)
+- ❌ Push notification จริง (มีแค่ตัวเลขแดงบนแท็บ poll ทุก 15 วิ · ส่วนแชทเด้งสดผ่าน socket แล้ว)
+- ❌ ลบ/แก้ไขข้อความในแชท · เก็บกวาดไฟล์รูปเก่า (ลบงาน → แถวใน DB หาย แต่ไฟล์ยังค้างบนดิสก์)
 - ❌ ~~Flutter app~~ — **ยกเลิกแล้ว 2026-07-17**
 - ❌ ระบบตั๋ว / โมเดลรายได้
 - ❌ rate limit, CSRF token, SSL ของจริง
