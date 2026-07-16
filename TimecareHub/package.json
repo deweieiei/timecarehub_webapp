@@ -1,0 +1,21 @@
+{
+  "name": "timecarehub",
+  "version": "0.1.0",
+  "description": "TimeCareHub - แพลตฟอร์มจับคู่ผู้ว่าจ้างกับแคร์กิฟเวอร์ผู้สูงอายุ",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "migrate": "node db/migrate.js",
+    "seed": "node db/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.12.0"
+  }
+}

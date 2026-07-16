@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#0e7c86">
+  <title>TimeCareHub — เข้าสู่ระบบ</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="auth">
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 22l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>
+          </svg>
+        </div>
+        <h1>TimeCareHub</h1>
+        <p>จับคู่ผู้ดูแลผู้สูงอายุ ใกล้บ้านคุณ</p>
+      </div>
+
+      <div class="tabs">
+        <button id="tabLogin" class="on">เข้าสู่ระบบ</button>
+        <button id="tabRegister">สมัครสมาชิก</button>
+      </div>
+
+      <div id="msg"></div>
+
+      <form id="loginForm">
+        <div class="field">
+          <label>อีเมล</label>
+          <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="field">
+          <label>รหัสผ่าน</label>
+          <input type="password" name="password" required autocomplete="current-password">
+        </div>
+        <button class="btn btn-block">เข้าสู่ระบบ</button>
+      </form>
+
+      <form id="registerForm" class="hide">
+        <div class="field">
+          <label>ชื่อ-นามสกุล</label>
+          <input name="full_name" required placeholder="สมชาย ใจดี">
+        </div>
+        <div class="field">
+          <label>อีเมล</label>
+          <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="field">
+          <label>เบอร์โทร</label>
+          <input name="phone" type="tel" inputmode="tel" placeholder="08x-xxx-xxxx">
+        </div>
+        <div class="field">
+          <label>รหัสผ่าน <span style="color:var(--muted);font-weight:400">(อย่างน้อย 8 ตัว)</span></label>
+          <input type="password" name="password" required minlength="8" autocomplete="new-password">
+        </div>
+        <button class="btn btn-block">สมัครสมาชิก</button>
+      </form>
+
+      <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:20px">
+        สมัครบัญชีเดียว ใช้ได้ทั้ง<br><strong>จ้างคนดูแล</strong> และ <strong>รับงานดูแล</strong>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const msg = $('#msg');
+
+    $('#tabLogin').onclick = () => switchTab(true);
+    $('#tabRegister').onclick = () => switchTab(false);
+
+    function switchTab(login) {
+      $('#tabLogin').classList.toggle('on', login);
+      $('#tabRegister').classList.toggle('on', !login);
+      $('#loginForm').classList.toggle('hide', !login);
+      $('#registerForm').classList.toggle('hide', login);
+      msg.innerHTML = '';
+    }
+
+    async function submit(form, url) {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        msg.innerHTML = `<div class="alert alert-err">${j.error}</div>`;
+        return;
+      }
+      location.href = '/choose.html';   // ล็อกอินเสร็จ → ไปหน้าเลือกบทบาท
+    }
+
+    $('#loginForm').onsubmit = (e) => { e.preventDefault(); submit(e.target, '/api/auth/login'); };
+    $('#registerForm').onsubmit = (e) => { e.preventDefault(); submit(e.target, '/api/auth/register'); };
+  </script>
+</body>
+</html>

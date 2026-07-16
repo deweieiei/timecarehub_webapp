@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e7c86">
+  <title>เลือกบทบาท | TimeCareHub</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <script src="/js/frame.js"></script>
+  <script>
+    (async function () {
+      await buildFrame({ role: null });   // ไม่มีแถบเมนูล่างในหน้านี้
+
+      const kyc = ME.kyc_status || 'none';
+      const kycBadge = {
+        none:     '<span class="badge badge-none">ยังไม่ยืนยันตัวตน</span>',
+        pending:  '<span class="badge badge-pending">รอแอดมินอนุมัติ</span>',
+        approved: '<span class="badge badge-approved">✓ ยืนยันแล้ว</span>',
+        rejected: '<span class="badge badge-rejected">เอกสารถูกปฏิเสธ</span>',
+      }[kyc];
+
+      view.innerHTML = `
+        <div class="choose">
+          <div class="choose-head">
+            <h1>สวัสดีครับ คุณ${esc(ME.full_name)}</h1>
+            <p>วันนี้คุณต้องการทำอะไร?</p>
+          </div>
+
+          <div class="choose-grid">
+            <button class="choose-card employer" data-role="employer">
+              <span class="choose-icon">${ICONS.briefcase}</span>
+              <strong>ต้องการจ้างแคร์กิฟเวอร์</strong>
+              <p>โพสงานดูแลผู้สูงอายุ ปักหมุดตำแหน่งบ้าน<br>แล้วเลือกคนที่ถูกใจจากคนที่มากดขอรับงาน</p>
+              <span class="choose-go">เข้าสู่หน้าผู้ว่าจ้าง →</span>
+            </button>
+
+            <button class="choose-card caregiver" data-role="caregiver">
+              <span class="choose-icon">${ICONS.hands}</span>
+              <strong>เป็นแคร์กิฟเวอร์</strong>
+              <p>หางานดูแลผู้สูงอายุใกล้บ้าน<br>กดขอรับงาน คุยตกลงราคา แล้วรับงาน</p>
+              <span class="choose-status">สถานะยืนยันตัวตน: ${kycBadge}</span>
+              <span class="choose-go">เข้าสู่หน้าแคร์กิฟเวอร์ →</span>
+            </button>
+          </div>
+
+          <p class="choose-note">
+            💡 สลับบทบาทได้ตลอดเวลา — กดปุ่ม
+            <span class="inline-icon">${ICONS.swap}</span> ที่มุมขวาบน
+          </p>
+        </div>`;
+
+      $$('.choose-card').forEach((c) => (c.onclick = () => {
+        location.href = c.dataset.role === 'employer' ? '/employer.html' : '/caregiver.html';
+      }));
+    })();
+  </script>
+</body>
+</html>

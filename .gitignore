@@ -1,0 +1,27 @@
+# ⚠️ repo นี้เป็น PUBLIC — อะไรที่หลุดขึ้นไปแล้วถือว่าหลุดถาวร (Google แคชไปแล้ว)
+# ห้ามเอาออกจากลิสต์นี้ถ้าไม่แน่ใจ
+
+# รหัสผ่าน DB + JWT secret ตัวจริง — ห้ามขึ้น git เด็ดขาด
+.env
+.env.*
+!.env.example
+
+# ของที่ npm install เอาคืนมาได้เอง
+node_modules/
+
+# รูปบัตรประชาชน / เซลฟี่ ของผู้ใช้จริง — ข้อมูลส่วนบุคคลอ่อนไหว
+uploads/
+
+# log
+*.log
+npm-debug.log*
+
+# ขยะของ Windows / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Flutter — ยกเลิกแล้ว (2026-07-17) ถ้าจะรื้อกลับมาให้ `flutter create` ใหม่
+TimecareHub/timecarehub/

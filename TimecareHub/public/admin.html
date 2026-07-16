@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e7c86">
+  <title>แอดมิน | TimeCareHub</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="admin">
+  <script src="/js/frame.js"></script>
+  <script>
+    (async function () {
+      await buildFrame({ role: null });
+
+      if (!ME.is_admin) {
+        view.innerHTML = '<div class="alert alert-err">บัญชีนี้ไม่ใช่แอดมิน</div>';
+        return;
+      }
+
+      async function load() {
+        const { items } = await api('/api/kyc/caregivers');
+        const approved = items.filter((u) => u.kyc_status === 'approved').length;
+
+        view.innerHTML = `
+          <h2>แคร์กิฟเวอร์ในระบบ</h2>
+          <p class="sub">ยืนยันตัวตนแล้ว ${approved} คน · ทั้งหมด ${items.length} คน</p>
+
+          <div class="alert alert-warn">
+            <strong>ℹ️ โหมดเดโม — ปิดระบบ KYC ชั่วคราว</strong><br>
+            ตอนนี้แคร์กิฟเวอร์กดปุ่มเดียวก็ยืนยันตัวตนผ่านเลย ไม่ต้องอัปบัตรประชาชน ไม่ต้องรอแอดมิน<br>
+            ระบบจริงจะมีคิวรออนุมัติตรงนี้ (โครงสร้างฐานข้อมูลเตรียมไว้แล้ว เปิดกลับได้ทันที)
+          </div>
+
+          ${items.length ? items.map((u) => `
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center">
+                <div style="display:flex;gap:12px;align-items:center;flex:1;min-width:260px">
+                  <span class="avatar" style="background:linear-gradient(135deg,var(--teal),var(--teal-dark))">${esc(initial(u.full_name))}</span>
+                  <div style="min-width:0">
+                    <h3 style="font-size:17px;font-weight:700">${esc(u.full_name)}</h3>
+                    <div class="hint" style="margin:0">${esc(u.email)} · ${esc(u.phone || 'ไม่ระบุเบอร์')}</div>
+                    <div class="meta" style="margin-top:8px">
+                      <span class="badge badge-${u.kyc_status}">${KYC_TH[u.kyc_status]}</span>
+                      <span class="chip">⭐ ${Number(u.rating_avg).toFixed(1)} (${u.rating_count})</span>
+                      <span class="chip">ประสบการณ์ ${u.experience_years} ปี</span>
+                      <span class="chip">ขอรับงานไป ${u.applied_count} งาน</span>
+                    </div>
+                    ${u.skills ? `<p style="font-size:14px;margin-top:8px">${esc(u.skills)}</p>` : ''}
+                    ${u.bio ? `<p style="font-size:14px;color:var(--muted);margin-top:4px">${esc(u.bio)}</p>` : ''}
+                  </div>
+                </div>
+
+                ${u.kyc_status === 'approved'
+                  ? `<button class="btn btn-sm btn-danger" data-revoke="${u.id}">เพิกถอนการยืนยัน</button>`
+                  : ''}
+              </div>
+            </div>`).join('')
+            : emptyBox('ยังไม่มีแคร์กิฟเวอร์ในระบบ')}`;
+
+        $$('[data-revoke]').forEach((b) => (b.onclick = async () => {
+          if (!confirm('เพิกถอนการยืนยันตัวตนของคนนี้?\nเขาจะกดขอรับงานไม่ได้ และเห็นแค่ตำแหน่งคร่าว ๆ')) return;
+          await api(`/api/kyc/revoke/${b.dataset.revoke}`, { method: 'POST' });
+          toast('เพิกถอนแล้ว');
+          load();
+        }));
+      }
+
+      load();
+    })();
+  </script>
+</body>
+</html>
