@@ -194,11 +194,14 @@ function drawCgPins() {
   browseItems.forEach((c) => {
     if (c.lat == null || c.lng == null) return;   // ยังไม่ปักหมุด — โผล่ในรายการได้ แต่ปักบนแผนที่ไม่ได้
 
+    // โชว์รูปโปรไฟล์แทนป้ายชื่อ — ไม่มีรูปก็ถอยไปใช้อักษรแรกของชื่อ
+    const face = c.photo_url ? `<img src="${esc(c.photo_url)}" alt="" loading="lazy">` : esc(initial(c.full_name));
+
     L.marker([c.lat, c.lng], {
       icon: L.divIcon({
         className: 'pin',
-        html: `<div class="pin-body" data-cgpin="${c.id}">
-                 <div class="pin-label">${esc(c.full_name)}</div><div class="pin-tip"></div>
+        html: `<div class="pin-body" data-cgpin="${c.id}" title="${esc(c.full_name)}">
+                 <div class="pin-photo">${face}</div><div class="pin-tip"></div>
                </div>`,
         iconSize: [null, null],
         iconAnchor: [0, 0],   // จัดตำแหน่งเองด้านล่าง
@@ -369,10 +372,11 @@ async function openCardSheet(id) {
       radius: c.service_radius_km * 1000,
       color: '#0e7c86', weight: 1.5, dashArray: '6 6', fillColor: '#0e7c86', fillOpacity: .06, interactive: false,
     }).addTo(map);
+    const face = c.photo_url ? `<img src="${esc(c.photo_url)}" alt="">` : esc(initial(c.full_name));
     L.marker([c.lat, c.lng], {
       icon: L.divIcon({
         className: 'pin',
-        html: `<div class="pin-body"><div class="pin-label">${esc(c.area_label || c.full_name)}</div><div class="pin-tip"></div></div>`,
+        html: `<div class="pin-body" title="${esc(c.full_name)}"><div class="pin-photo">${face}</div><div class="pin-tip"></div></div>`,
         iconSize: [null, null], iconAnchor: [0, 0],
       }),
     }).addTo(map);

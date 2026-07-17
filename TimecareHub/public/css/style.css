@@ -333,6 +333,8 @@ input[type=file] { padding: 10px; font-size: 14px; }
   box-shadow: 0 10px 26px rgba(14, 124, 134, .32);
 }
 .auth .logo-mark svg { width: 40px; height: 40px; color: #fff; }
+/* โลโก้จริง (หัวใจ) บนหน้า login — ไม่ต้องมีกล่องเทียลครอบ */
+.auth .logo-img { display: block; width: 96px; height: 96px; margin: 0 auto 12px; object-fit: contain; }
 .auth .logo h1 { font-size: 27px; font-weight: 700; letter-spacing: -.5px; }
 .auth .logo p { color: var(--muted); font-size: 14px; }
 
@@ -506,6 +508,19 @@ input[type=file] { padding: 10px; font-size: 14px; }
 /* หมุดคนที่กำลังเลือกดู (หน้าหาคนดูแล) — เด่นกว่าหมุดอื่น */
 .pin-body.sel .pin-label { background: var(--amber-dark); transform: scale(1.08); }
 .pin-body.sel { z-index: 1000; }
+
+/* หมุดแบบรูปโปรไฟล์ — โชว์รูปแคร์กิฟเวอร์แทนป้ายชื่อ (หน้าหาคนดูแล + บัตร) */
+.pin-photo {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 3px solid #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, .3);
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--teal), var(--teal-dark));
+  display: grid; place-items: center;
+  color: #fff; font-weight: 700; font-size: 18px;
+}
+.pin-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* หมุดคนที่กำลังเลือกดู — วงเหลืองรอบรูป */
+.pin-body.sel .pin-photo { border-color: var(--amber-dark); transform: scale(1.08); }
 
 /* ป้ายระยะห่าง — เน้นกว่า chip ปกติ เพราะเป็นข้อมูลหลักตอนเลือกคนใกล้ */
 .chip-near { background: #fef3c7; color: #b45309; font-weight: 600; }
