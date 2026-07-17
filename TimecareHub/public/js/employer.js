@@ -4,6 +4,7 @@ let postPicker = null;
 let pickArea = '';   // ชื่อย่านที่อ่านได้จากหมุดตอนโพสงาน — ส่งขึ้นไปเป็น area_label ให้อัตโนมัติ
 
 const RATE_UNIT_TH = { per_hour: 'บาท/ชม.', per_day: 'บาท/วัน', per_month: 'บาท/เดือน' };
+const GENDER_TH = { male: 'ชาย', female: 'หญิง', other: 'อื่น ๆ', undisclosed: 'ไม่ระบุ' };
 
 // ==========================================================
 //  ⭐ หาคนดูแล — ปักหมุดบ้าน แล้วดูว่ามีใครรับงานแถวนั้นบ้าง
@@ -182,6 +183,7 @@ async function runBrowse() {
   $$('[data-hire]', $('#results')).forEach((b) => (b.onclick = () => {
     openHireSheet(browseItems.find((x) => String(x.id) === b.dataset.hire));
   }));
+  $$('[data-card]', $('#results')).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => openCardSheet(b.dataset.card))));
   $$('[data-locate-cg]', $('#results')).forEach((b) => (b.onclick = () => showOnMap(b.dataset.locateCg)));
 }
 
@@ -262,10 +264,129 @@ function cgCard(c) {
 
       <div class="job-actions">
         ${c.lat != null ? `<button class="btn btn-sm btn-ghost" data-locate-cg="${c.id}">📍 ดูบนแผนที่</button>` : ''}
-        <a class="btn btn-sm btn-ghost" href="/caregiver-card.html?id=${c.id}" style="text-align:center;text-decoration:none">ดูบัตร</a>
+        <button class="btn btn-sm btn-ghost" data-card="${c.id}">ดูบัตร</button>
         <button class="btn btn-sm" data-hire="${c.id}">ส่งคำขอจ้าง</button>
       </div>
     </div>`;
+}
+
+// ---------- แผ่นบัตรแคร์กิฟเวอร์ (popup) ----------
+// กด "ดูบัตร" บนการ์ด → เด้ง popup ประวัติเต็มขึ้นมา ไม่ต้องเปลี่ยนหน้า
+// ดึงข้อมูลจาก /api/caregivers/:id เอง (มี เลขบัตรปิดบัง/เพศ/สัญชาติ/อายุ ที่รายการค้นหาไม่ส่งมา)
+async function openCardSheet(id) {
+  let c;
+  try {
+    ({ caregiver: c } = await api(`/api/caregivers/${id}`));
+  } catch (e) {
+    return toast(e.message, 4200);
+  }
+
+  document.querySelector('.sheet-backdrop')?.remove();
+
+  const hasPin = c.lat != null && c.lng != null;
+  const row = (k, v) => (v ? `<div class="sheet-row"><div class="k">${k}</div><div class="v">${v}</div></div>` : '');
+  const reviewed = c.kyc_reviewed_at
+    ? new Date(c.kyc_reviewed_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+    : null;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <h3>บัตรแคร์กิฟเวอร์</h3>
+        <button class="sheet-close" aria-label="ปิด">✕</button>
+      </div>
+
+      <div class="cg-hero" style="margin-top:12px">
+        ${avatar(c, { cls: 'avatar-xl' })}
+        <div style="flex:1;min-width:0">
+          <h2 style="margin:0;font-size:20px">${esc(c.full_name)}</h2>
+          <div class="hint" style="margin:4px 0 0">
+            📍 ${esc(c.area_label || 'ไม่ระบุย่าน')} · ประสบการณ์ ${c.experience_years} ปี
+            ${c.age != null ? ` · อายุ ${c.age} ปี` : ''}
+          </div>
+          <div style="margin-top:8px">
+            <span class="badge badge-approved">✓ ยืนยันตัวตนแล้ว</span>
+            ${c.rating_count ? `<span class="stars" style="margin-left:6px">${stars(c.rating_avg)}</span>
+              <span class="hint" style="display:inline">(${c.rating_count})</span>` : ''}
+          </div>
+        </div>
+        ${c.rate ? `<div class="price" style="font-size:20px">${fmtBaht(c.rate)}<small>${RATE_UNIT_TH[c.rate_unit]}</small></div>` : ''}
+      </div>
+
+      ${c.skills ? `<div style="margin-top:18px">
+        <h4 class="card-title">ทักษะ</h4>
+        <div class="meta" style="margin:0">${c.skills.split(',').map((s) => `<span class="chip">${esc(s.trim())}</span>`).join('')}</div>
+      </div>` : ''}
+
+      ${c.bio ? `<div style="margin-top:18px">
+        <h4 class="card-title">แนะนำตัว</h4>
+        <p style="font-size:15px;white-space:pre-wrap;margin:0">${esc(c.bio)}</p>
+      </div>` : ''}
+
+      <div style="margin-top:18px">
+        <h4 class="card-title">ข้อมูลยืนยันตัวตน</h4>
+        <div class="alert alert-info" style="margin:8px 0 4px">
+          🔒 เลขบัตรถูกปิดบางส่วนเพื่อความปลอดภัย — เห็นแค่พอเทียบกับบัตรตัวจริงตอนเจอหน้า
+        </div>
+        ${row('เลขบัตรประชาชน', c.national_id_masked ? `<code style="font-size:15px;letter-spacing:1px">${esc(c.national_id_masked)}</code>` : '<span style="color:var(--muted)">ยังไม่ได้กรอกในโปรไฟล์</span>')}
+        ${row('เพศ', c.gender ? GENDER_TH[c.gender] : '')}
+        ${row('สัญชาติ', esc(c.nationality || ''))}
+        ${row('ยืนยันตัวตนเมื่อ', reviewed)}
+      </div>
+
+      <div style="margin-top:18px">
+        <h4 class="card-title">ย่านที่รับงาน</h4>
+        ${hasPin
+          ? `<p class="hint" style="margin:6px 0 10px">🚗 รับงานในรัศมี ${c.service_radius_km} กม. จากหมุดนี้</p>
+             <div class="map-wrap"><div id="cardMap"></div></div>`
+          : `<p class="hint" style="margin:6px 0 0">ยังไม่ได้ปักหมุดย่านที่รับงาน</p>`}
+      </div>
+
+      <button class="btn btn-block" id="cardHireBtn" style="margin-top:20px">ส่งคำขอจ้าง ${esc(c.full_name)}</button>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+
+  const close = () => backdrop.remove();
+  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
+  backdrop.querySelector('.sheet-close').onclick = close;
+  // กด Esc ปิดได้ — เก็บ listener ทิ้งตอนปิด ไม่ให้ค้าง
+  const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+  document.addEventListener('keydown', onEsc);
+
+  // ส่งคำขอจ้าง — อยู่หน้าเดียวกันอยู่แล้ว ปิดบัตรแล้วเปิดแผ่นจ้างต่อได้เลย ไม่ต้องเปลี่ยนหน้า
+  backdrop.querySelector('#cardHireBtn').onclick = () => { close(); openHireSheet(c); };
+
+  if (hasPin) {
+    const map = L.map('cardMap', { scrollWheelZoom: false }).setView([c.lat, c.lng], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+    // สีเขียนตรง ๆ ไม่ใช้ var(): Leaflet ยัดค่าลง attribute ของ SVG ซึ่ง var() ใช้ไม่ได้
+    L.circle([c.lat, c.lng], {
+      radius: c.service_radius_km * 1000,
+      color: '#0e7c86', weight: 1.5, dashArray: '6 6', fillColor: '#0e7c86', fillOpacity: .06, interactive: false,
+    }).addTo(map);
+    L.marker([c.lat, c.lng], {
+      icon: L.divIcon({
+        className: 'pin',
+        html: `<div class="pin-body"><div class="pin-label">${esc(c.area_label || c.full_name)}</div><div class="pin-tip"></div></div>`,
+        iconSize: [null, null], iconAnchor: [0, 0],
+      }),
+    }).addTo(map);
+
+    // แผ่นมีอนิเมชันเลื่อนขึ้น — Leaflet วัดขนาดตอนแผ่นยังไม่นิ่ง แผนที่จะเทาครึ่งใบ
+    // รอให้แผ่นนิ่งก่อนแล้วค่อยสั่งวัดใหม่ + จัดปลายหมุด (สโคปเฉพาะหมุดในแผ่นนี้)
+    setTimeout(() => {
+      map.invalidateSize();
+      $$('.leaflet-marker-icon.pin', backdrop).forEach((el) => {
+        el.style.marginLeft = `-${el.offsetWidth / 2}px`;
+        el.style.marginTop = `-${el.offsetHeight}px`;
+      });
+    }, 280);
+  }
 }
 
 // ---------- แผ่นส่งคำขอจ้าง ----------
