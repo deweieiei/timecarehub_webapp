@@ -198,7 +198,10 @@ function wirePhotoPicker({ root = document, onChange } = {}) {
     pickBtn.classList.add('loading');   // วงกลมหมุนระหว่างย่อรูป + อัป
     try {
       const body = new FormData();
-      body.append('photo', await shrinkImage(file), 'photo.jpg');
+      // ย่อรูปก่อนอัป — แต่ถ้าย่อแล้วได้ค่าแปลก ๆ (ไม่ใช่ Blob) ให้ถอยไปใช้ไฟล์ต้นฉบับ
+      // กัน FormData.append เด้ง "parameter 2 is not of type 'Blob'" เด็ดขาด
+      const shrunk = await shrinkImage(file);
+      body.append('photo', shrunk instanceof Blob ? shrunk : file, 'photo.jpg');
       const { photo_url } = await api('/api/profile/me/photo', { method: 'POST', body });
       render(photo_url);
       toast('อัปรูปโปรไฟล์แล้ว');

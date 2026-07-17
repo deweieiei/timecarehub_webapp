@@ -605,7 +605,8 @@ async function sendImage(file) {
       const fd = new FormData();
       fd.append('client_id', client_id);
       if (w && h) { fd.append('w', w); fd.append('h', h); }
-      fd.append('image', blob, 'photo.jpg');
+      // ย่อแล้วได้ค่าแปลก ๆ ให้ถอยไปใช้ไฟล์ต้นฉบับ — กัน append เด้ง "not of type 'Blob'"
+      fd.append('image', blob instanceof Blob ? blob : file, 'photo.jpg');
 
       // ต้องบอกคู่สนทนาทาง query — ด่านตรวจสิทธิ์ทำงานก่อน multer จะเขียนไฟล์ลงดิสก์ (ตอนนั้นยังอ่าน body ไม่ได้)
       const r = await api(`/api/chat/${chat.jobId}/image?with=${chat.otherId}`, { method: 'POST', body: fd });
