@@ -356,17 +356,25 @@ async function viewApplied() {
     rejected: ['rejected', 'ไม่ได้รับเลือก'],
   };
 
+  // แยกคำขอจ้างตรงเป็น 2 กอง:
+  //   active  = ที่ยังต้องจัดการ (รอตอบรับ / จับคู่แล้วกำลังคุยงาน)
+  //   history = ที่จบแล้ว (งานเสร็จ / ปฏิเสธไป) → ย้ายลงกล่อง "ประวัติ" ท้ายหน้า ไม่รกกองงานจริง
+  const active = offers.filter((o) => o.status === 'offered' || o.status === 'matched');
+  const history = offers.filter((o) => o.status === 'done' || o.status === 'declined');
   const waiting = offers.filter((o) => o.status === 'offered').length;
+
+  // เก็บ offer ทั้งหมดไว้เปิดแผ่นรายละเอียด (ปุ่ม "ดูรายละเอียดงาน") — ค้นด้วย id
+  const offerById = Object.fromEntries(offers.map((o) => [o.id, o]));
 
   view.innerHTML = `
     <h2>งานของฉัน</h2>
     <p class="sub">คำขอจ้างที่ส่งมาหาคุณ และงานที่คุณไปกดขอรับไว้</p>
 
     <h3 style="font-size:16px;margin:18px 0 10px">
-      คำขอจ้างตรง (${offers.length})
+      คำขอจ้างตรง (${active.length})
       ${waiting ? `<span class="badge badge-pending" style="margin-left:6px">ใหม่ ${waiting}</span>` : ''}
     </h3>
-    ${offers.length ? offers.map(offerCard).join('') : emptyBox('ยังไม่มีใครส่งคำขอจ้างมา')}
+    ${active.length ? active.map(offerCard).join('') : emptyBox('ยังไม่มีใครส่งคำขอจ้างมา')}
 
     <h3 style="font-size:16px;margin:22px 0 10px">งานที่ขอรับไว้ (${applied.length})</h3>
     ${applied.length ? applied.map((j) => `
@@ -385,13 +393,19 @@ async function viewApplied() {
           <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
         </div>
       </div>`).join('')
-      : emptyBox('ยังไม่ได้ขอรับงานไหน<br>ไปที่แท็บ "หางาน"')}`;
+      : emptyBox('ยังไม่ได้ขอรับงานไหน<br>ไปที่แท็บ "หางาน"')}
+
+    ${history.length ? `
+      <h3 style="font-size:16px;margin:22px 0 10px">ประวัติ (${history.length})</h3>
+      ${history.map(offerCard).join('')}
+    ` : ''}`;
 
   $$('[data-accept]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => respond(b.dataset.accept, 'accept'))));
   $$('[data-decline]', view).forEach((b) => (b.onclick = (e) => {
     if (!confirm('ปฏิเสธคำขอจ้างนี้?')) return;
     withSpin(e.currentTarget, () => respond(b.dataset.decline, 'decline'));
   }));
+  $$('[data-detail]', view).forEach((b) => (b.onclick = () => openOfferSheet(offerById[b.dataset.detail])));
   $$('[data-chatjob]', view).forEach((b) => (b.onclick = () => {
     go('chat', CAREGIVER_VIEWS);
     setTimeout(() => openChat(b.dataset.chatjob, b.dataset.other), 250);
@@ -400,6 +414,7 @@ async function viewApplied() {
 
 function offerCard(j) {
   const isNew = j.status === 'offered';
+  const isMatched = j.status === 'matched';
   return `
     <div class="job" ${isNew ? 'style="border:2px solid var(--amber)"' : ''}>
       <div class="job-top">
@@ -421,12 +436,95 @@ function offerCard(j) {
       ${j.tasks ? `<p style="margin-top:4px;font-size:14px;color:var(--muted)">${esc(j.tasks)}</p>` : ''}
 
       <div class="job-actions">
+        <button class="btn btn-sm btn-ghost" data-detail="${j.id}">ดูรายละเอียดงาน</button>
         ${isNew ? `
           <button class="btn btn-sm btn-ghost" data-decline="${j.id}">ปฏิเสธ</button>
           <button class="btn btn-sm" data-accept="${j.id}">ตอบรับงาน</button>`
-        : `<button class="btn btn-sm btn-ghost btn-block" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>`}
+        : isMatched ? `<button class="btn btn-sm" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>`
+        : ''}
       </div>
     </div>`;
+}
+
+// ==========================================================
+//  แผ่นรายละเอียดคำขอจ้างตรง — เด้งขึ้นตอนกด "ดูรายละเอียดงาน"
+//  ปุ่มด้านล่างปรับตามสถานะ: รอตอบรับ → ตอบรับ/ปฏิเสธ, จับคู่แล้ว → คุยกับผู้ว่าจ้าง, จบแล้ว → ไม่มีปุ่ม
+// ==========================================================
+function openOfferSheet(j) {
+  if (!j) return;
+  closeSheet();
+
+  const row = (k, v) => (v ? `<div class="sheet-row"><div class="k">${k}</div><div class="v">${v}</div></div>` : '');
+
+  const period = [j.start_date, j.end_date]
+    .filter(Boolean)
+    .map((d) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }))
+    .join(' – ');
+
+  const isNew = j.status === 'offered';
+  const isMatched = j.status === 'matched';
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+
+      <div class="sheet-head">
+        <h3>${esc(j.title)}</h3>
+        <button class="sheet-close" aria-label="ปิด">✕</button>
+      </div>
+
+      <div class="meta" style="margin-top:8px">
+        <span class="badge badge-${j.status}">${STATUS_TH[j.status]}</span>
+        <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
+      </div>
+
+      <div class="sheet-price">
+        <b>฿${fmtBaht(j.budget)}</b>
+        <span>${UNIT_TH[j.budget_unit]}</span>
+        <span style="margin-left:auto;font-size:12.5px">งบตั้งต้น — ต่อรองในแชทได้</span>
+      </div>
+
+      ${row('ผู้ว่าจ้าง', esc(j.employer_name || '-'))}
+      ${row('เบอร์ติดต่อ', isMatched && j.employer_phone ? esc(j.employer_phone) : (j.employer_phone ? '<span style="color:var(--muted)">ตอบรับงานก่อนถึงเห็นเบอร์</span>' : ''))}
+      ${row('อาการผู้สูงอายุ', esc(j.elder_condition || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
+      ${row('สิ่งที่ต้องทำ', esc(j.tasks || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
+      ${row('ช่วงเวลา', period || '<span style="color:var(--muted)">ยืดหยุ่น / ตกลงกันภายหลัง</span>')}
+      ${row('ตำแหน่ง', j.address ? `📍 ${esc(j.address)}` : '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
+
+      ${isNew ? `
+        <div class="sheet-actions">
+          <button class="btn btn-ghost" id="sheetDecline">ปฏิเสธ</button>
+          <button class="btn" id="sheetAccept">ตอบรับงาน</button>
+        </div>`
+      : isMatched ? `
+        <div class="sheet-actions">
+          <button class="btn btn-block" id="sheetChat">💬 คุยกับผู้ว่าจ้าง</button>
+        </div>`
+      : ''}
+    </div>`;
+
+  document.body.appendChild(backdrop);
+
+  // ปิดเมื่อกดพื้นหลัง / ปุ่มกากบาท / Esc
+  backdrop.onclick = (e) => { if (e.target === backdrop) closeSheet(); };
+  backdrop.querySelector('.sheet-close').onclick = closeSheet;
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { closeSheet(); document.removeEventListener('keydown', onEsc); }
+  });
+
+  backdrop.querySelector('#sheetAccept')?.addEventListener('click', (e) =>
+    withSpin(e.currentTarget, async () => { await respond(j.id, 'accept'); closeSheet(); }));
+  backdrop.querySelector('#sheetDecline')?.addEventListener('click', (e) => {
+    if (!confirm('ปฏิเสธคำขอจ้างนี้?')) return;
+    withSpin(e.currentTarget, async () => { await respond(j.id, 'decline'); closeSheet(); });
+  });
+  backdrop.querySelector('#sheetChat')?.addEventListener('click', () => {
+    closeSheet();
+    go('chat', CAREGIVER_VIEWS);
+    setTimeout(() => openChat(j.id, j.employer_id), 250);
+  });
 }
 
 async function respond(jobId, decision) {
