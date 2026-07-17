@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { setAuthCookie, clearAuthCookie, requireAuth } = require('../auth');
+const { photoUrl } = require('../photo');
 
 const router = express.Router();
 
@@ -65,8 +66,10 @@ router.post('/logout', (req, res) => {
 });
 
 // ข้อมูลผู้ใช้ปัจจุบัน (หน้าเว็บเรียกตอนโหลด)
+// ส่ง URL ของรูปออกไป ไม่ใช่ path ในดิสก์ — ผังโฟลเดอร์ server ไม่ใช่เรื่องที่หน้าเว็บต้องรู้
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: req.user });
+  const { photo_path, ...user } = req.user;
+  res.json({ user: { ...user, photo_url: photoUrl(user.id, photo_path) } });
 });
 
 // สลับบทบาท employer <-> caregiver

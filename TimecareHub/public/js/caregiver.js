@@ -438,15 +438,22 @@ async function respond(jobId, decision) {
 }
 
 // ==========================================================
-//  ยืนยันตัวตน — โหมดเดโม: กดปุ่มเดียวผ่านทันที
+//  บัตรแคร์กิฟเวอร์ — รูป + ประวัติ + ย่านที่รับงาน (ปักหมุดเอง)
+//  บัตรใบนี้คือสิ่งที่ผู้ว่าจ้างเห็นตอนหาคน — หมุดที่ปักคือตัวตัดสินว่าจะโผล่ในผลค้นหาของใคร
+//
+//  ยืนยันตัวตน = โหมดเดโม กดปุ่มเดียวผ่านทันที
 //  (ไม่มีอัปรูปบัตร ไม่ต้องรอแอดมิน — แต่ยังคุม GPS 2 ระดับเหมือนเดิม)
 // ==========================================================
+let cardPicker = null;
+
 async function viewKyc() {
+  cardPicker = null;
   const p = await api('/api/kyc/me');
   const approved = p.kyc_status === 'approved';
+  const hasPin = p.lat != null && p.lng != null;
 
   view.innerHTML = `
-    <h2>บัตรประชาชนแคร์กิฟเวอร์</h2>
+    <h2>บัตรแคร์กิฟเวอร์</h2>
     <p class="sub">
       สถานะ: <span class="badge badge-${p.kyc_status}">${KYC_TH[p.kyc_status]}</span>
       · ข้อมูลชื่อ/ที่อยู่/บัตรประชาชนส่วนตัว อยู่ที่ <a href="/profile.html" style="color:var(--teal);font-weight:600">โปรไฟล์ของฉัน</a>
@@ -460,25 +467,28 @@ async function viewKyc() {
       : `<div class="alert alert-info">
            <strong>ตอนนี้คุณยังยืนยันตัวตนไม่สำเร็จ</strong><br>
            • เห็นงานได้ แต่เห็นแค่ <strong>ตำแหน่งคร่าว ๆ (วงกลม)</strong> ไม่เห็นที่อยู่จริง<br>
-           • ยัง <strong>กดขอรับงานไม่ได้</strong>
+           • ยัง <strong>กดขอรับงานไม่ได้</strong> และยัง <strong>ไม่โผล่ให้ผู้ว่าจ้างเห็น</strong>
          </div>`}
 
     <form id="kycForm">
+      <input type="hidden" name="lat" id="cardLat" value="${hasPin ? p.lat : ''}">
+      <input type="hidden" name="lng" id="cardLng" value="${hasPin ? p.lng : ''}">
+
       <div class="card">
-        <p style="font-size:14px;color:var(--muted);margin-bottom:14px">
-          ข้อมูลนี้คือสิ่งที่<strong>ผู้ว่าจ้างเห็นตอนเดินหาคนดูแล</strong> — ใส่ครบ โอกาสถูกจ้างสูงกว่ามาก
+        <h3 class="card-title">รูปโปรไฟล์</h3>
+        ${photoPickerHtml(p, 'รูปหน้าตรง เห็นหน้าชัด — <strong>ผู้ว่าจ้างเห็นรูปนี้เป็นอย่างแรก</strong> ตอนเลือกคนเข้าบ้าน')}
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">ประวัติการทำงาน</h3>
+        <p class="hint" style="margin:-6px 0 14px">
+          ข้อมูลนี้คือสิ่งที่<strong>ผู้ว่าจ้างเห็นตอนหาคนดูแล</strong> — ใส่ครบ โอกาสถูกจ้างสูงกว่ามาก
         </p>
         <div class="row">
           <div class="field">
             <label>ประสบการณ์ (ปี)</label>
             <input type="number" inputmode="numeric" name="experience_years" min="0" value="${p.experience_years || 0}">
           </div>
-          <div class="field">
-            <label>ย่านที่รับงาน</label>
-            <input name="area_label" value="${esc(p.area_label || '')}" placeholder="ลาดพร้าว">
-          </div>
-        </div>
-        <div class="row">
           <div class="field">
             <label>เรตที่รับ</label>
             <input type="number" inputmode="numeric" name="rate" min="0" value="${p.rate ? Math.round(p.rate) : ''}" placeholder="700">
@@ -502,6 +512,43 @@ async function viewKyc() {
         </div>
       </div>
 
+      <div class="card">
+        <h3 class="card-title">ย่านที่รับงาน</h3>
+
+        <div class="alert alert-warn" style="margin-bottom:14px">
+          <strong>👀 หมุดนี้ผู้ว่าจ้างเห็นตรง ๆ บนแผนที่</strong><br>
+          ปัก<strong>ย่านที่อยากรับงาน</strong> (เช่น ปากซอย ห้าง สถานีรถไฟฟ้าใกล้บ้าน) — ไม่ต้องปักบ้านตัวเอง
+        </div>
+
+        <div class="field">
+          <label>ค้นหาว่าตอนนี้เราอยู่ตรงไหน</label>
+          <div class="row" style="align-items:center">
+            <input id="cardFind" placeholder="ลาดพร้าว 15 · MRT ห้วยขวาง · เซ็นทรัลปิ่นเกล้า">
+            <button type="button" id="cardFindBtn" class="btn btn-sm btn-ghost" style="flex:0 0 auto">ค้นหาในแผนที่</button>
+          </div>
+          <p class="hint">พิมพ์แล้วกดค้นหา แผนที่จะเลื่อนไปให้ · หรือกดปุ่ม ◎ ใช้ตำแหน่งเครื่องก็ได้</p>
+        </div>
+
+        <p id="cardPinInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงย่านที่จะรับงาน</p>
+        ${pickerBox()}
+
+        <div class="row" style="margin-top:14px;align-items:flex-end">
+          <div class="field" style="margin:0">
+            <label>ยอมเดินทางไกลแค่ไหน</label>
+            <select name="service_radius_km" id="cardRadius">
+              ${[5, 10, 20, 30, 50].map((r) =>
+                `<option value="${r}" ${(p.service_radius_km || 10) === r ? 'selected' : ''}>ในรัศมี ${r} กม. จากหมุด</option>`).join('')}
+            </select>
+            <p class="hint">ผู้ว่าจ้างที่หาคนไกลกว่านี้จะไม่เจอคุณ</p>
+          </div>
+          <div class="field" style="margin:0">
+            <label>ชื่อย่าน</label>
+            <input name="area_label" id="cardArea" value="${esc(p.area_label || '')}" placeholder="ลาดพร้าว">
+            <p class="hint">ระบบอ่านจากหมุดให้ — แก้เองได้</p>
+          </div>
+        </div>
+      </div>
+
       <div class="card" style="background:var(--teal-light);box-shadow:none">
         <p style="font-size:14px;color:var(--teal-dark)">
           <strong>ℹ️ โหมดเดโม</strong><br>
@@ -510,25 +557,95 @@ async function viewKyc() {
         </p>
       </div>
 
-      <button class="btn btn-block" ${approved ? 'disabled' : ''}>
-        ${approved ? '✓ ยืนยันตัวตนแล้ว' : 'ยืนยันตัวตน'}
-      </button>
+      <button class="btn btn-block" id="cardSave">${approved ? 'บันทึกการเปลี่ยนแปลง' : 'ยืนยันตัวตน'}</button>
+      ${approved ? '' : '<p class="hint" style="text-align:center;margin-top:10px">ต้องปักหมุดย่านที่รับงานก่อน ถึงจะยืนยันตัวตนได้</p>'}
     </form>`;
 
-  $('#kycForm').onsubmit = async (e) => {
+  wirePhotoPicker({ onChange: setMyPhoto });
+
+  // มีหมุดเดิมอยู่แล้ว → เปิดมาที่หมุดเดิม อย่าให้ GPS ลากไปที่อื่นแล้วทับของที่ตั้งใจปักไว้
+  cardPicker = createPicker({
+    center: hasPin ? [p.lat, p.lng] : BKK,
+    zoom: hasPin ? 15 : 13,
+    autoLocate: !hasPin,
+    onMove: onCardPinMoved,
+  });
+
+  drawServiceRing();
+  $('#cardRadius').onchange = drawServiceRing;
+  cardPicker.map.on('move', drawServiceRing);   // วงรัศมีต้องติดหมุดตอนลากแผนที่ ไม่ใช่ค้างที่เดิม
+
+  $('#cardFindBtn').onclick = () => cardPicker.search($('#cardFind').value.trim(), $('#cardFindBtn'));
+  // ในฟอร์ม ปุ่ม Enter จะไปกดส่งฟอร์ม — ดักไว้ให้กลายเป็นค้นหาที่อยู่แทน
+  $('#cardFind').onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
     e.preventDefault();
-    try {
-      const data = Object.fromEntries(new FormData(e.target));
-      await api('/api/kyc/verify', { method: 'POST', body: JSON.stringify(data) });
-
-      // อัปเดต ME — หน้าหางานจะได้เห็นพิกัดเป๊ะทันที ไม่ต้องรีโหลด
-      const { user } = await api('/api/auth/me');
-      ME = user;
-
-      toast('ยืนยันตัวตนสำเร็จ — กดขอรับงานได้แล้ว');
-      viewKyc();
-    } catch (err) { toast(err.message, 4500); }
+    cardPicker.search($('#cardFind').value.trim(), $('#cardFindBtn'));
   };
+
+  $('#kycForm').onsubmit = (e) => {
+    e.preventDefault();
+    saveCard(e.target, approved);
+  };
+}
+
+// ---------- หมุดขยับ: จำพิกัด + เติมชื่อย่านให้ ----------
+function onCardPinMoved({ lat, lng, area, loading }) {
+  $('#cardLat').value = lat;
+  $('#cardLng').value = lng;
+  $('#cardPinInfo').textContent = loading
+    ? `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} — กำลังอ่านชื่อย่าน…`
+    : `📍 ${area || 'ตำแหน่งนี้'} · ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+  // เติมชื่อย่านให้เฉพาะตอนช่องยังว่าง — ผู้ใช้พิมพ์เองแล้วห้ามไปทับ
+  const areaInput = $('#cardArea');
+  if (!loading && area && areaInput && !areaInput.value.trim()) areaInput.value = area;
+}
+
+// ---------- วงรัศมีที่ยอมเดินทาง ----------
+let serviceRing = null;
+
+function drawServiceRing() {
+  if (!cardPicker) return;
+  const radius = Number($('#cardRadius').value) * 1000;
+  const at = cardPicker.center();
+
+  // setLatLng/setRadius แทนการลบแล้ววาดใหม่ — ลากแผนที่ทีนึง move ยิงเป็นสิบรอบ
+  if (serviceRing) return serviceRing.setLatLng(at).setRadius(radius);
+
+  // สีเขียนตรง ๆ ไม่ใช้ var(--teal): Leaflet ยัดค่านี้ลง attribute stroke/fill ของ SVG
+  // ซึ่ง var() ใช้ใน presentation attribute ไม่ได้ → เส้นจะกลายเป็นสีดำ
+  serviceRing = L.circle(at, {
+    radius,
+    color: '#0e7c86', weight: 1.5, dashArray: '6 6',
+    fillColor: '#0e7c86', fillOpacity: .06,
+    interactive: false,
+  }).addTo(cardPicker.map);
+}
+
+// ---------- บันทึก ----------
+// ยืนยันแล้ว → บันทึกเฉย ๆ ไม่แตะสถานะ | ยังไม่ยืนยัน → บันทึก + ยืนยันตัวตนรวดเดียว
+async function saveCard(form, approved) {
+  const btn = $('#cardSave');
+  const data = Object.fromEntries(new FormData(form));
+
+  btn.disabled = true;
+  try {
+    await api(approved ? '/api/kyc/profile' : '/api/kyc/verify', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+
+    // อัปเดต ME — หน้าหางานจะได้เห็นพิกัดเป๊ะทันที ไม่ต้องรีโหลด
+    const { user } = await api('/api/auth/me');
+    ME = user;
+
+    toast(approved ? 'บันทึกบัตรแล้ว' : 'ยืนยันตัวตนสำเร็จ — กดขอรับงานได้แล้ว และผู้ว่าจ้างเริ่มเห็นคุณแล้ว', 4200);
+    viewKyc();
+  } catch (err) {
+    toast(err.message, 4500);
+    btn.disabled = false;
+  }
 }
 
 // ==========================================================

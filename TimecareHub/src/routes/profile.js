@@ -1,15 +1,26 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+
 const db = require('../db');
 const { requireAuth } = require('../auth');
+const { UPLOAD_ROOT, AVATAR_DIR, photoUrl } = require('../photo');
+const { ageFrom } = require('../util');
 
 const router = express.Router();
 
 // ============================================================
 //  โปรไฟล์บัญชีผู้ใช้ — ข้อมูล "ของคน" ใช้ร่วมกันทั้ง 2 บทบาท
-//  (คนละอันกับ "บัตรประชาชนแคร์กิฟเวอร์" ที่ /api/kyc ซึ่งเป็นข้อมูลฝั่งรับงาน)
+//  (คนละอันกับ "บัตรแคร์กิฟเวอร์" ที่ /api/kyc ซึ่งเป็นข้อมูลฝั่งรับงาน)
 //
-//  ⚠️ ไฟล์นี้เป็นที่เดียวที่ได้รับอนุญาตให้ส่ง national_id ออกไป
+//  ⚠️ ไฟล์นี้เป็นที่เดียวที่ได้รับอนุญาตให้ส่ง national_id "ตัวเต็ม" ออกไป
 //     และส่งให้ "เจ้าของบัญชีเท่านั้น" — route อื่นห้าม SELECT u.* เด็ดขาด
+//
+//     ข้อยกเว้นเดียว: /api/caregivers/:id ส่ง "เลขที่ปิดบังแล้ว" ของแคร์กิฟเวอร์
+//     ที่ยืนยันตัวตนแล้ว ให้ผู้ว่าจ้างเห็น — ปิดบังในตัว SQL ตัวเต็มไม่เคยออกมาถึง Node
+//     (ตกลงกับพี่ดิว 2026-07-17 · ดูกฎเต็มที่ db/003_user_profile.sql)
 // ============================================================
 
 // คอลัมน์ที่ผู้ใช้แก้เองได้ — เป็น allowlist ไม่ใช่ blocklist
@@ -27,7 +38,9 @@ const EDITABLE = [
 ];
 
 // คอลัมน์ที่ส่งกลับให้เจ้าของบัญชี = ที่แก้ได้ + ที่อ่านอย่างเดียว
-const READABLE = [...EDITABLE, 'id', 'email', 'is_admin', 'active_role', 'created_at', 'profile_updated_at'];
+// photo_path อยู่ในนี้แต่ไม่อยู่ใน EDITABLE — เปลี่ยนได้ทางอัปโหลดเท่านั้น
+// (ไม่งั้นผู้ใช้ยิง PUT ตั้ง path เป็นไฟล์อะไรก็ได้ในเครื่อง server)
+const READABLE = [...EDITABLE, 'id', 'email', 'is_admin', 'active_role', 'created_at', 'profile_updated_at', 'photo_path'];
 
 const ENUMS = {
   gender: ['male', 'female', 'other', 'undisclosed'],
@@ -45,17 +58,6 @@ function validThaiId(id) {
   return (11 - (sum % 11)) % 10 === Number(id[12]);
 }
 
-function ageFrom(birthDate) {
-  if (!birthDate) return null;
-  const b = new Date(birthDate);
-  if (Number.isNaN(b.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - b.getFullYear();
-  const m = now.getMonth() - b.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
-  return age >= 0 && age < 130 ? age : null;
-}
-
 // DATE จาก MySQL กลับมาเป็น Date object — <input type="date"> ต้องการ YYYY-MM-DD
 const toDateInput = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
@@ -67,10 +69,11 @@ router.get('/me', requireAuth, async (req, res) => {
   );
   if (!rows.length) return res.status(404).json({ error: 'ไม่พบบัญชีผู้ใช้' });
 
-  const p = rows[0];
+  const { photo_path, ...p } = rows[0];
   for (const f of DATE_FIELDS) p[f] = toDateInput(p[f]);
 
-  res.json({ profile: { ...p, age: ageFrom(p.birth_date) } });
+  // ส่ง URL ออกไป ไม่ใช่ path ในดิสก์ — ผังโฟลเดอร์ของ server ไม่ใช่เรื่องที่หน้าเว็บต้องรู้
+  res.json({ profile: { ...p, age: ageFrom(p.birth_date), photo_url: photoUrl(p.id, photo_path) } });
 });
 
 // ---------- บันทึกโปรไฟล์ตัวเอง ----------
@@ -128,6 +131,91 @@ router.put('/me', requireAuth, async (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+// ============================================================
+//  รูปโปรไฟล์
+//  รูปคือสิ่งแรกที่ผู้ว่าจ้างดูตอนเลือกคนเข้าบ้าน — ตัวอักษรย่อในวงกลมบอกอะไรไม่ได้เลย
+// ============================================================
+
+const EXT_OF = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => fs.mkdir(AVATAR_DIR, { recursive: true }, (err) => cb(err, AVATAR_DIR)),
+    filename: (req, file, cb) => cb(null, crypto.randomUUID() + EXT_OF[file.mimetype]),
+  }),
+  // หน้าเว็บย่อรูปให้เหลือ ~512px ก่อนส่งอยู่แล้ว (ดู shrinkImage ใน public/js/frame.js)
+  // ตัวเลขนี้เป็นตาข่ายกันคนยิงตรงมาที่ API — ต้องเท่ากับที่แชทใช้ ไม่งั้นข้อความ error ท้าย server.js โกหก
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (EXT_OF[file.mimetype]) return cb(null, true);
+    // status: 400 → "คุณส่งของผิด" ไม่ใช่ "ระบบพัง" (ตัวจับ error ท้าย server.js อ่านค่านี้)
+    cb(Object.assign(new Error('รองรับเฉพาะไฟล์รูป (JPG, PNG, WebP)'), { status: 400 }));
+  },
+});
+
+// ---------- ดูรูปของใครก็ได้ที่ล็อกอินแล้ว ----------
+// ทำไมไม่ปล่อยเป็นไฟล์ static: ผู้ว่าจ้างต้องเห็นรูปแคร์กิฟเวอร์ในไดเรกทอรีก็จริง
+// แต่ "คนที่ล็อกอินแล้ว" กับ "ใครก็ได้ในอินเทอร์เน็ต" ไม่ใช่เรื่องเดียวกัน
+// รูปหน้าคนทำงานดูแลผู้สูงอายุไม่ควรถูกกวาดไปทำอย่างอื่นได้ด้วยการเดา URL
+router.get('/photo/:userId', requireAuth, async (req, res, next) => {
+  try {
+    const [rows] = await db.query('SELECT photo_path FROM users WHERE id = ?', [req.params.userId]);
+    const rel = rows[0]?.photo_path;
+    if (!rel) return res.status(404).json({ error: 'ยังไม่มีรูปโปรไฟล์' });
+
+    const file = path.resolve(UPLOAD_ROOT, rel);
+    if (!file.startsWith(path.resolve(AVATAR_DIR))) return res.status(400).json({ error: 'path ไม่ถูกต้อง' });
+
+    // เปลี่ยนรูป = ชื่อไฟล์ใหม่ = ?v= ใหม่ (ดู src/photo.js) → URL นี้แทนรูปเดิมตลอดกาล cache ยาวได้
+    // private = ห้าม proxy/CDN เก็บไว้แจกคนที่ยังไม่ล็อกอิน
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    res.sendFile(file, (err) => {
+      if (err) next(err);
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---------- อัปรูปของตัวเอง ----------
+router.post('/me/photo', requireAuth, upload.single('photo'), async (req, res, next) => {
+  if (!req.file) return res.status(400).json({ error: 'ยังไม่ได้เลือกรูป' });
+
+  try {
+    const rel = path.relative(UPLOAD_ROOT, req.file.path).split(path.sep).join('/');
+    const [[old]] = await db.query('SELECT photo_path FROM users WHERE id = ?', [req.user.id]);
+
+    await db.query('UPDATE users SET photo_path = ? WHERE id = ?', [rel, req.user.id]);
+
+    // รูปเก่าไม่มีใครอ้างถึงแล้ว — ลบทิ้ง ไม่งั้น uploads/ บวมขึ้นทุกครั้งที่มีคนเปลี่ยนรูป
+    if (old?.photo_path) fs.unlink(path.resolve(UPLOAD_ROOT, old.photo_path), () => {});
+
+    res.json({ ok: true, photo_url: photoUrl(req.user.id, rel) });
+  } catch (e) {
+    // บันทึกลง DB ไม่ผ่าน = ไฟล์ที่เพิ่งเขียนไปกลายเป็นขยะ เก็บกวาดซะ
+    fs.unlink(req.file.path, () => {});
+    next(e);
+  }
+});
+
+// ---------- ลบรูปของตัวเอง ----------
+router.delete('/me/photo', requireAuth, async (req, res, next) => {
+  try {
+    const [[row]] = await db.query('SELECT photo_path FROM users WHERE id = ?', [req.user.id]);
+    if (!row?.photo_path) return res.json({ ok: true });   // ไม่มีรูปอยู่แล้ว = สำเร็จตามที่ขอ
+
+    await db.query('UPDATE users SET photo_path = NULL WHERE id = ?', [req.user.id]);
+    fs.unlink(path.resolve(UPLOAD_ROOT, row.photo_path), () => {});
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
 });
 
 module.exports = router;

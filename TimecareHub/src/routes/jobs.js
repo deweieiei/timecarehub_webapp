@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireApprovedCaregiver } = require('../auth');
 const { maskJob } = require('../geo');
+const { photoUrl } = require('../photo');
 
 const router = express.Router();
 
@@ -147,7 +148,7 @@ router.get('/:id/applicants', requireAuth, async (req, res) => {
 
   const [rows] = await db.query(
     `SELECT a.id, a.status, a.message, a.created_at,
-            u.id AS caregiver_id, u.full_name, u.phone,
+            u.id AS caregiver_id, u.full_name, u.phone, u.photo_path,
             c.bio, c.experience_years, c.skills, c.rating_avg, c.rating_count
        FROM job_applications a
        JOIN users u ON u.id = a.caregiver_id
@@ -156,7 +157,11 @@ router.get('/:id/applicants', requireAuth, async (req, res) => {
       ORDER BY c.rating_avg DESC, a.created_at ASC`,
     [job.id]
   );
-  res.json({ items: rows });
+
+  // เลือกคนเข้าบ้านทั้งที ควรได้เห็นหน้าเขาก่อน — ไม่ใช่แค่ตัวอักษรย่อในวงกลม
+  res.json({
+    items: rows.map(({ photo_path, ...a }) => ({ ...a, photo_url: photoUrl(a.caregiver_id, photo_path) })),
+  });
 });
 
 // ---------- ผู้ว่าจ้าง: เลือกแคร์กิฟเวอร์ 1 คน ----------

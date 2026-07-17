@@ -31,7 +31,7 @@ async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const [rows] = await db.query(
-      `SELECT u.id, u.email, u.full_name, u.phone, u.active_role, u.is_admin,
+      `SELECT u.id, u.email, u.full_name, u.phone, u.active_role, u.is_admin, u.photo_path,
               c.kyc_status, c.rating_avg, c.rating_count
          FROM users u
          LEFT JOIN caregiver_profiles c ON c.user_id = u.id

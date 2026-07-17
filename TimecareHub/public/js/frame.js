@@ -108,6 +108,102 @@ const dayKey = (s) => {
 const initial = (name) => String(name || '?').trim().charAt(0);
 const emptyBox = (text) => `<div class="empty">${ICONS.empty}<p>${text}</p></div>`;
 
+// ---------- รูปโปรไฟล์ ----------
+// มีรูปก็โชว์รูป ไม่มีก็ถอยไปใช้อักษรแรกของชื่อเหมือนเดิม
+// รับ object ที่มี photo_url + full_name (ME, แคร์กิฟเวอร์, ผู้สมัคร — หน้าตาเหมือนกันหมด)
+const avatar = (u, { cls = '', style = '' } = {}) => `
+  <span class="avatar ${cls}" style="${style}">${u?.photo_url
+    ? `<img src="${esc(u.photo_url)}" alt="" loading="lazy">`
+    : esc(initial(u?.full_name))}</span>`;
+
+// ย่อรูปในเครื่องก่อนอัป — มือถือถ่ายมาทีละ 4-8 MB แต่รูปโปรไฟล์โชว์จริงไม่เกิน ~100 px
+// ย่อก่อนส่ง = ประหยัดเน็ตผู้ใช้ ประหยัดดิสก์ server และหน้า "หาคนดูแล" ที่โหลด 9 รูปพร้อมกันไม่อืด
+// (ไม่ได้ใช้ sharp ฝั่ง server เพราะไม่อยากลงตัวต่อ native เพิ่มบนเครื่อง serverlive)
+async function shrinkImage(file, max = 512) {
+  try {
+    // from-image = หมุนตาม EXIF ให้ด้วย ไม่งั้นรูปแนวตั้งจากมือถือจะออกมานอนตะแคง
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale);
+    const h = Math.round(bmp.height * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+    return blob || file;
+  } catch {
+    return file;   // เบราว์เซอร์เก่าย่อไม่ได้ → ส่งไฟล์เดิมไป (server จำกัดขนาดไว้อยู่แล้ว)
+  }
+}
+
+// กล่องเลือกรูปโปรไฟล์ — ใช้ทั้งหน้าบัตรแคร์กิฟเวอร์ และหน้าโปรไฟล์ของฉัน
+// วาง HTML ก่อน แล้วเรียก wirePhotoPicker() ตอน element อยู่ใน DOM แล้ว
+const photoPickerHtml = (user, hint) => `
+  <div class="photo-pick">
+    ${avatar(user, { cls: 'photo-preview' })}
+    <div class="photo-pick-actions">
+      <button type="button" class="btn btn-sm btn-ghost" data-photo-pick>
+        ${user?.photo_url ? 'เปลี่ยนรูป' : 'เลือกรูป'}
+      </button>
+      <button type="button" class="btn btn-sm btn-ghost ${user?.photo_url ? '' : 'hide'}" data-photo-del>ลบรูป</button>
+      <p class="hint">${hint}</p>
+    </div>
+  </div>
+  <input type="file" accept="image/*" class="hide" data-photo-file>`;
+
+// อัปทันทีที่เลือกรูป ไม่ต้องรอกดบันทึกฟอร์ม —
+// ผู้ใช้เลือกรูปแล้วเห็นรูปขึ้นเลยคือสิ่งที่ทุกแอพทำ ถ้าต้องกดบันทึกอีกทีคนจะลืมกดแล้วรูปหาย
+// onChange(photo_url | null) — ให้หน้าที่เรียกเอาไปอัปเดตรูปที่อื่น (เช่น หัวเว็บ) ต่อเอง
+function wirePhotoPicker({ root = document, onChange } = {}) {
+  const preview = $('.photo-preview', root);
+  const pickBtn = $('[data-photo-pick]', root);
+  const delBtn = $('[data-photo-del]', root);
+  const fileInput = $('[data-photo-file]', root);
+
+  const render = (url) => {
+    preview.innerHTML = url ? `<img src="${esc(url)}" alt="">` : esc(initial(ME?.full_name));
+    pickBtn.textContent = url ? 'เปลี่ยนรูป' : 'เลือกรูป';
+    delBtn.classList.toggle('hide', !url);
+    onChange?.(url);
+  };
+
+  pickBtn.onclick = () => fileInput.click();
+
+  fileInput.onchange = async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    pickBtn.disabled = true;
+    pickBtn.textContent = 'กำลังอัป…';
+    try {
+      const body = new FormData();
+      body.append('photo', await shrinkImage(file), 'photo.jpg');
+      const { photo_url } = await api('/api/profile/me/photo', { method: 'POST', body });
+      render(photo_url);
+      toast('อัปรูปโปรไฟล์แล้ว');
+    } catch (e) {
+      toast(e.message, 4200);
+      render(ME?.photo_url);
+    } finally {
+      pickBtn.disabled = false;
+      fileInput.value = '';   // เลือกไฟล์เดิมซ้ำต้องยิง change ได้อีก
+    }
+  };
+
+  delBtn.onclick = async () => {
+    if (!confirm('ลบรูปโปรไฟล์?')) return;
+    try {
+      await api('/api/profile/me/photo', { method: 'DELETE' });
+      render(null);
+      toast('ลบรูปแล้ว');
+    } catch (e) { toast(e.message); }
+  };
+}
+
 // ==========================================================
 //  กรอบ — เรียกจากทุกหน้าที่ต้องล็อกอิน
 //
@@ -146,7 +242,7 @@ async function buildFrame({ role, tabs = [], render = {} } = {}) {
         <!-- จอกว้าง: โชว์เรียงกันบนหัว | จอแคบ: ยุบเข้าเมนู 3 ขีด -->
         <div class="header-actions" id="headerActions">
           <div class="user-bar">
-            <span class="avatar">${esc(initial(ME.full_name))}</span>
+            ${avatar(ME)}
             <span class="user-meta">
               <strong>${esc(ME.full_name)}</strong>
               ${role ? `<span class="role-chip role-${role}">${ROLE_TH[role]}</span>` : ''}
@@ -211,6 +307,13 @@ async function buildFrame({ role, tabs = [], render = {} } = {}) {
   }
 
   return ME;
+}
+
+// เปลี่ยน/ลบรูปแล้ว รูปบนหัวเว็บต้องเปลี่ยนตามทันที ไม่ใช่รอผู้ใช้กดรีเฟรชเอง
+function setMyPhoto(url) {
+  ME.photo_url = url || null;
+  const el = $('.user-bar .avatar');
+  if (el) el.innerHTML = url ? `<img src="${esc(url)}" alt="">` : esc(initial(ME.full_name));
 }
 
 // ---------- ตัวเลขแดง ๆ บนแท็บ ----------

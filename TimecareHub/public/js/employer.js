@@ -1,54 +1,255 @@
-// ฝั่งผู้ว่าจ้าง — หาแคร์กิฟเวอร์ / โพสงาน / งานของฉัน / แชท
+// ฝั่งผู้ว่าจ้าง — หาคนดูแล / โพสงาน / งานของฉัน / แชท
 
-let pickMap = null;
-let pickArea = '';   // ชื่อย่านที่อ่านได้จากหมุด — ส่งขึ้นไปเป็น area_label ให้อัตโนมัติ
+let postPicker = null;
+let pickArea = '';   // ชื่อย่านที่อ่านได้จากหมุดตอนโพสงาน — ส่งขึ้นไปเป็น area_label ให้อัตโนมัติ
 
 const RATE_UNIT_TH = { per_hour: 'บาท/ชม.', per_day: 'บาท/วัน', per_month: 'บาท/เดือน' };
 
 // ==========================================================
-//  ⭐ หาแคร์กิฟเวอร์ — เดินดูโปรไฟล์แล้วส่งคำขอจ้างได้เลย
-//     ไม่ต้องโพสงาน ไม่ต้องปักหมุด
+//  ⭐ หาคนดูแล — ปักหมุดบ้าน แล้วดูว่ามีใครรับงานแถวนั้นบ้าง
 //     (แสดงเฉพาะคนที่ยืนยันตัวตนแล้ว)
+//
+//  ล้อกับฝั่งแคร์กิฟเวอร์หางาน (public/js/caregiver.js) ให้เป็นคู่กัน — หาได้ 2 แบบ:
+//    1) ปักหมุด + รัศมี → เจอเฉพาะคนที่รับงานแถวนั้น เรียงจากใกล้ไปไกล
+//    2) ดูทั้งหมด      → เห็นทุกคน ไม่สนตำแหน่ง (เผื่อคนที่ยังไม่ได้ปักหมุด)
 // ==========================================================
-async function viewBrowse(q = '') {
-  const { items } = await api(`/api/caregivers${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+let browsePicker = null;
+let cgLayer = null;       // เลเยอร์หมุดคน — ล้างทีเดียวได้
+let searchRing = null;    // วงรัศมีรอบหมุดค้นหา
+let browseMode = 'pin';   // 'pin' = ปักหมุดหาในรัศมี | 'all' = ดูทั้งหมด
+let browseItems = [];     // ผลค้นหารอบล่าสุด — ใช้ตอนกดหมุด/กดปุ่มบนการ์ด
+let browseTimer = null;
+
+// รัศมีกว้างแค่ไหน ควรเห็นแผนที่กว้างเท่าไหร่ — ไม่งั้นเลือก 50 กม. แล้ววงล้นจอไปไกล
+const ZOOM_FOR = { 5: 13, 10: 12, 20: 11, 30: 10, 50: 9 };
+
+async function viewBrowse() {
+  browsePicker = cgLayer = searchRing = null;
+  browseItems = [];
+  browseMode = 'pin';
+  clearTimeout(browseTimer);
 
   view.innerHTML = `
-    <h2>หาแคร์กิฟเวอร์</h2>
-    <p class="sub">ดูโปรไฟล์แล้วส่งคำขอจ้างได้เลย — แสดงเฉพาะคนที่ยืนยันตัวตนแล้ว</p>
+    <h2>หาคนดูแล</h2>
+    <p class="sub">ปักหมุดตรงบ้าน แล้วดูว่ามีแคร์กิฟเวอร์รับงานแถวนั้นกี่คน</p>
 
-    <div class="card">
-      <div class="row" style="align-items:flex-end">
-        <div class="field" style="margin:0;flex:2">
-          <label>ค้นหา</label>
-          <input id="q" value="${esc(q)}" placeholder="ชื่อ / ทักษะ / ย่าน เช่น ติดเตียง, ลาดพร้าว">
+    <div class="seg">
+      <button type="button" data-bmode="pin" class="on">📍 ปักหมุดหาในรัศมี</button>
+      <button type="button" data-bmode="all">👥 ดูทั้งหมด</button>
+    </div>
+
+    <div class="card" id="pinCard">
+      <div class="field">
+        <label>จะให้ไปดูแลที่ไหน</label>
+        <div class="row" style="align-items:center">
+          <input id="placeFind" placeholder="ลาดพร้าว 15 · MRT ห้วยขวาง · รพ.รามคำแหง">
+          <button type="button" id="placeFindBtn" class="btn btn-sm btn-ghost" style="flex:0 0 auto">ค้นหาในแผนที่</button>
         </div>
+        <p class="hint">พิมพ์แล้วกดค้นหา แผนที่จะเลื่อนไปให้ · หรือกดปุ่ม ◎ ใช้ตำแหน่งเครื่องก็ได้</p>
+      </div>
+
+      <p id="browsePinInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงกับบ้าน</p>
+      ${pickerBox({ tall: true })}
+
+      <div class="row" style="margin-top:14px;align-items:flex-end">
         <div class="field" style="margin:0">
-          <button class="btn btn-block" id="doSearch" type="button">🔍 ค้นหา</button>
+          <label>หาคนในรัศมี</label>
+          <select id="browseRadius">
+            ${[5, 10, 20, 30, 50].map((r) => `<option value="${r}" ${r === 20 ? 'selected' : ''}>${r} กม. จากหมุด</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0;flex:1.3">
+          <button class="btn btn-block" id="browseSearch" type="button">🔍 ค้นหาคนแถวนี้</button>
         </div>
       </div>
     </div>
 
-    ${items.length
-      ? `<p class="sub">พบ ${items.length} คน</p>` + items.map(cgCard).join('')
-      : emptyBox('ไม่พบแคร์กิฟเวอร์ที่ตรงกับคำค้น')}`;
+    <div class="card">
+      <div class="row" style="align-items:flex-end;margin:0">
+        <div class="field" style="margin:0;flex:2">
+          <label>กรองด้วยชื่อ / ทักษะ <span class="hint" style="display:inline;font-weight:400">(ไม่ใส่ก็ได้)</span></label>
+          <input id="q" placeholder="ติดเตียง · ผู้ช่วยพยาบาล · ทำกายภาพ">
+        </div>
+        <div class="field" style="margin:0">
+          <button class="btn btn-block btn-ghost" id="doSearch" type="button">กรอง</button>
+        </div>
+      </div>
+    </div>
 
-  const run = () => viewBrowse($('#q').value.trim());
-  $('#doSearch').onclick = run;
-  $('#q').onkeydown = (e) => { if (e.key === 'Enter') run(); };
+    <div id="results" style="margin-top:16px"></div>`;
 
-  $$('[data-hire]', view).forEach((b) => (b.onclick = () => {
-    openHireSheet(items.find((c) => String(c.id) === b.dataset.hire));
+  $$('[data-bmode]', view).forEach((b) => (b.onclick = () => setBrowseMode(b.dataset.bmode)));
+
+  browsePicker = createPicker({ onMove: onBrowsePinMoved });
+  cgLayer = L.layerGroup().addTo(browsePicker.map);
+  browsePicker.map.on('move', drawSearchRing);
+
+  $('#browseRadius').onchange = () => {
+    drawSearchRing();
+    browsePicker.map.setZoom(ZOOM_FOR[$('#browseRadius').value]);   // ซูมออกให้เห็นวงเต็ม
+    runBrowse();   // ถ้าซูมเท่าเดิมอยู่แล้ว moveend จะไม่ยิง — ต้องสั่งค้นหาเอง
+  };
+  $('#browseSearch').onclick = () => runBrowse();
+  $('#placeFindBtn').onclick = () => browsePicker.search($('#placeFind').value.trim(), $('#placeFindBtn'));
+  $('#placeFind').onkeydown = (e) => { if (e.key === 'Enter') browsePicker.search($('#placeFind').value.trim(), $('#placeFindBtn')); };
+
+  $('#doSearch').onclick = () => runBrowse();
+  $('#q').onkeydown = (e) => { if (e.key === 'Enter') runBrowse(); };
+
+  drawSearchRing();
+  runBrowse();
+}
+
+// ---------- สลับโหมด ----------
+function setBrowseMode(mode) {
+  if (mode === browseMode) return;
+  browseMode = mode;
+
+  $$('[data-bmode]', view).forEach((b) => b.classList.toggle('on', b.dataset.bmode === mode));
+  $('#pinCard').classList.toggle('hide', mode !== 'pin');
+  runBrowse();
+}
+
+// ---------- หมุดขยับ → ค้นหาใหม่ ----------
+function onBrowsePinMoved({ lat, lng, area, loading }) {
+  const el = $('#browsePinInfo');
+  if (el) {
+    el.textContent = loading
+      ? `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} — กำลังอ่านชื่อย่าน…`
+      : `📍 ${area || 'ตำแหน่งนี้'} · ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+
+  // หน่วงเอง ไม่รอให้ชื่อย่านอ่านเสร็จก่อนค่อยค้นหา —
+  // Nominatim ล่ม/ช้าเมื่อไหร่ ผลค้นหาจะไม่ตามมาเลย ทั้งที่พิกัดรู้ตั้งแต่วินาทีแรกแล้ว
+  clearTimeout(browseTimer);
+  browseTimer = setTimeout(() => runBrowse(), 700);
+}
+
+// ---------- วงรัศมีค้นหา — ต้องติดหมุดกลางจอตอนลากแผนที่ ----------
+function drawSearchRing() {
+  if (!browsePicker) return;
+
+  if (browseMode !== 'pin') {
+    if (searchRing) { browsePicker.map.removeLayer(searchRing); searchRing = null; }
+    return;
+  }
+
+  const radius = Number($('#browseRadius').value) * 1000;
+  const at = browsePicker.center();
+  if (searchRing) return searchRing.setLatLng(at).setRadius(radius);
+
+  // สีเขียนตรง ๆ ไม่ใช้ var(--amber-dark): Leaflet ยัดค่านี้ลง attribute ของ SVG ซึ่ง var() ใช้ไม่ได้
+  searchRing = L.circle(at, {
+    radius,
+    color: '#d97706', weight: 1.5, dashArray: '6 6',
+    fillColor: '#f59e0b', fillOpacity: .06,
+    interactive: false,
+  }).addTo(browsePicker.map);
+}
+
+// ---------- ค้นหา + วาดผลลง แผนที่/รายการ ----------
+async function runBrowse() {
+  if (!browsePicker) return;
+
+  const q = $('#q')?.value.trim() || '';
+  const radius = $('#browseRadius').value;
+  const c = browsePicker.center();
+
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (browseMode === 'pin') {
+    params.set('lat', c.lat);
+    params.set('lng', c.lng);
+    params.set('radius_km', radius);
+  }
+
+  try {
+    ({ items: browseItems } = await api(`/api/caregivers?${params}`));
+  } catch (e) {
+    return toast(e.message, 4200);
+  }
+  if (!browsePicker) return;   // ผู้ใช้เปลี่ยนแท็บไปแล้วระหว่างรอ
+
+  drawCgPins();
+
+  $('#results').innerHTML = browseItems.length
+    ? `<h2 style="margin-bottom:4px">พบ ${browseItems.length} คน</h2>
+       <p class="sub">กด "ดูบนแผนที่" เพื่อดูว่าเขาอยู่ตรงไหน · กด "ดูบัตร" เพื่อดูประวัติเต็ม</p>
+       ${browseItems.map(cgCard).join('')}`
+    : (browseMode === 'pin'
+      ? `<div class="alert alert-info">
+           ไม่มีแคร์กิฟเวอร์รับงานในรัศมี ${radius} กม. จากหมุดนี้${q ? ` ที่ตรงกับ "${esc(q)}"` : ''} —
+           ลองขยายรัศมี ย้ายหมุด หรือ
+           <button class="btn btn-sm btn-ghost" id="seeAllCg" style="margin-top:8px">ดูทั้งหมด</button>
+         </div>`
+      : emptyBox('ยังไม่มีแคร์กิฟเวอร์ที่ยืนยันตัวตนในระบบตอนนี้'));
+
+  $('#seeAllCg')?.addEventListener('click', () => setBrowseMode('all'));
+  $$('[data-hire]', $('#results')).forEach((b) => (b.onclick = () => {
+    openHireSheet(browseItems.find((x) => String(x.id) === b.dataset.hire));
   }));
+  $$('[data-locate-cg]', $('#results')).forEach((b) => (b.onclick = () => showOnMap(b.dataset.locateCg)));
+}
+
+// ---------- หมุดคนบนแผนที่ ----------
+function drawCgPins() {
+  cgLayer.clearLayers();
+
+  browseItems.forEach((c) => {
+    if (c.lat == null || c.lng == null) return;   // ยังไม่ปักหมุด — โผล่ในรายการได้ แต่ปักบนแผนที่ไม่ได้
+
+    L.marker([c.lat, c.lng], {
+      icon: L.divIcon({
+        className: 'pin',
+        html: `<div class="pin-body" data-cgpin="${c.id}">
+                 <div class="pin-label">${esc(c.full_name)}</div><div class="pin-tip"></div>
+               </div>`,
+        iconSize: [null, null],
+        iconAnchor: [0, 0],   // จัดตำแหน่งเองด้านล่าง
+      }),
+    }).addTo(cgLayer).on('click', () => focusCard(c.id));
+  });
+
+  // จัดหมุดให้ปลายแหลมชี้ลงตรงพิกัดพอดี
+  $$('.leaflet-marker-icon.pin').forEach((el) => {
+    el.style.marginLeft = `-${el.offsetWidth / 2}px`;
+    el.style.marginTop = `-${el.offsetHeight}px`;
+  });
+}
+
+// กดหมุด → เลื่อนไปที่การ์ดของคนนั้น แล้วกระพริบให้รู้ว่าใบไหน
+function focusCard(id) {
+  const card = $(`[data-cgcard="${id}"]`, view);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('flash');
+  void card.offsetWidth;   // บังคับให้เบราว์เซอร์เริ่ม animation ใหม่ ถ้ากดหมุดเดิมซ้ำ
+  card.classList.add('flash');
+  markPin(id);
+}
+
+// กด "ดูบนแผนที่" บนการ์ด → เลื่อนแผนที่ไปหาเขา
+function showOnMap(id) {
+  const c = browseItems.find((x) => String(x.id) === String(id));
+  if (!c) return;
+  if (c.lat == null) return toast('แคร์กิฟเวอร์คนนี้ยังไม่ได้ปักหมุดย่านที่รับงาน');
+
+  markPin(id);
+  browsePicker.map.setView([c.lat, c.lng], 15);
+  $('#pinCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  toast(`${c.full_name} รับงานแถว ${c.area_label || 'ตรงหมุดนี้'}${c.distance_km != null ? ` · ห่างจากหมุดคุณ ${c.distance_km.toFixed(1)} กม.` : ''}`, 4000);
+}
+
+// ทำหมุดของคนที่กำลังดูให้เด่นกว่าหมุดอื่น
+function markPin(id) {
+  $$('[data-cgpin]').forEach((el) => el.classList.toggle('sel', el.dataset.cgpin === String(id)));
 }
 
 function cgCard(c) {
   return `
-    <div class="job">
+    <div class="job" data-cgcard="${c.id}">
       <div style="display:flex;gap:12px;align-items:center">
-        <div class="avatar" style="width:52px;height:52px;font-size:20px;background:linear-gradient(135deg,var(--teal),var(--teal-dark))">
-          ${esc(initial(c.full_name))}
-        </div>
+        ${avatar(c, { cls: 'avatar-lg' })}
         <div style="flex:1;min-width:0">
           <h3>${esc(c.full_name)}</h3>
           <div class="hint" style="margin:2px 0 0">
@@ -58,11 +259,17 @@ function cgCard(c) {
         ${c.rate ? `<div class="price">${fmtBaht(c.rate)}<small>${RATE_UNIT_TH[c.rate_unit]}</small></div>` : ''}
       </div>
 
-      ${c.skills ? `<div class="meta">${c.skills.split(',').map((s) => `<span class="chip">${esc(s.trim())}</span>`).join('')}</div>` : ''}
+      <div class="meta">
+        ${c.distance_km != null ? `<span class="chip chip-near">📏 ห่าง ${c.distance_km.toFixed(1)} กม.</span>` : ''}
+        <span class="chip">🚗 รับงานในรัศมี ${c.service_radius_km} กม.</span>
+        ${c.skills ? c.skills.split(',').map((s) => `<span class="chip">${esc(s.trim())}</span>`).join('') : ''}
+      </div>
       ${c.bio ? `<p style="margin-top:10px;font-size:14px;color:var(--muted)">${esc(c.bio)}</p>` : ''}
 
       <div class="job-actions">
-        <button class="btn btn-sm btn-block" data-hire="${c.id}">ส่งคำขอจ้าง</button>
+        ${c.lat != null ? `<button class="btn btn-sm btn-ghost" data-locate-cg="${c.id}">📍 ดูบนแผนที่</button>` : ''}
+        <a class="btn btn-sm btn-ghost" href="/caregiver-card.html?id=${c.id}" style="text-align:center;text-decoration:none">ดูบัตร</a>
+        <button class="btn btn-sm" data-hire="${c.id}">ส่งคำขอจ้าง</button>
       </div>
     </div>`;
 }
@@ -164,12 +371,8 @@ function openHireSheet(c) {
 //  โพสงานใหม่
 // ==========================================================
 function viewPost() {
-  pickMap = null;
+  postPicker = null;
   pickArea = '';
-  // ถ้าเพิ่งออกจากหน้านี้ไปตอนยังอ่านชื่อย่านไม่เสร็จ ทิ้งรอบเก่าให้หมด
-  // ไม่งั้นมันจะกลับมาทับ pickArea ของหมุดใหม่
-  clearTimeout(revTimer);
-  revCtl?.abort();
 
   view.innerHTML = `
     <h2>โพสงานใหม่</h2>
@@ -236,46 +439,34 @@ function viewPost() {
       <div class="card">
         <label>ปักหมุดตำแหน่ง *</label>
         <p id="pickInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงกับบ้าน</p>
-        <div class="map-wrap pick-wrap">
-          <div id="pickMap"></div>
-          <div class="pick-pin" id="pickPin" aria-hidden="true"></div>
-          <button type="button" id="btnMyLoc" class="map-locate" title="ใช้ตำแหน่งของฉัน">
-            <span>◎</span> ตำแหน่งของฉัน
-          </button>
-        </div>
+        ${pickerBox()}
       </div>
 
       <button class="btn btn-block">โพสงาน</button>
     </form>`;
 
-  pickMap = L.map('pickMap').setView(BKK, 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(pickMap);
-
-  // ขยับไปที่ตำแหน่งเครื่องให้ตอนเปิดหน้า — แต่ถ้าผู้ใช้เริ่มเลื่อนแผนที่เองแล้ว อย่าไปแย่งจอเขา
-  let touched = false;
-  pickMap.once('dragstart zoomstart', () => { touched = true; });
-  navigator.geolocation?.getCurrentPosition((p) => {
-    if (!touched) pickMap.setView([p.coords.latitude, p.coords.longitude], 16);
+  postPicker = createPicker({
+    onMove: ({ lat, lng, area, loading }) => {
+      pickArea = area;
+      $('#pickInfo').textContent = loading
+        ? `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} — กำลังอ่านชื่อย่าน…`
+        : `📍 ${area || 'ตำแหน่งนี้'} · ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    },
   });
 
-  const pin = $('#pickPin');
-  pickMap.on('movestart', () => pin.classList.add('lift'));
-  pickMap.on('moveend', () => { pin.classList.remove('lift'); onPinMoved(); });
-  onPinMoved();
-
-  $('#btnMyLoc').onclick = locateMe;
-  $('#addrFind').onclick = findAddress;
+  const findAddr = () => postPicker.search($('#addrInput').value.trim(), $('#addrFind'));
+  $('#addrFind').onclick = findAddr;
   // ในฟอร์ม ปุ่ม Enter จะไปกดส่งฟอร์ม — ดักไว้ให้กลายเป็นค้นหาที่อยู่แทน
   $('#addrInput').onkeydown = (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    findAddress();
+    findAddr();
   };
 
   $('#jobForm').onsubmit = async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target));
-    const c = pickMap.getCenter();
+    const c = postPicker.center();
     data.lat = c.lat;
     data.lng = c.lng;
     data.area_label = pickArea || null;   // ไม่ต้องให้ผู้ใช้พิมพ์ — อ่านจากหมุดให้เลย
@@ -285,86 +476,6 @@ function viewPost() {
       go('myjobs', EMPLOYER_VIEWS);
     } catch (err) { toast(err.message); }
   };
-}
-
-// ---------- หมุดกลางจอ: อ่านพิกัด + ชื่อย่าน จากจุดกึ่งกลางแผนที่ ----------
-const NOMINATIM = 'https://nominatim.openstreetmap.org';
-let revTimer = null;
-let revCtl = null;
-
-function onPinMoved() {
-  const c = pickMap.getCenter();
-  setPickInfo(`📍 ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)} — กำลังอ่านชื่อย่าน…`);
-
-  // เลื่อนแผนที่ทีเดียวยิงหลายรอบได้ — หน่วงไว้ แล้วยกเลิกรอบเก่าทิ้ง
-  // (Nominatim ขอไม่เกิน 1 ครั้ง/วินาที)
-  clearTimeout(revTimer);
-  revCtl?.abort();
-  revTimer = setTimeout(async () => {
-    revCtl = new AbortController();
-    try {
-      const r = await fetch(
-        `${NOMINATIM}/reverse?format=jsonv2&zoom=16&accept-language=th&lat=${c.lat}&lon=${c.lng}`,
-        { signal: revCtl.signal }
-      );
-      const a = (await r.json()).address || {};
-      pickArea = a.suburb || a.neighbourhood || a.city_district || a.town || a.village || a.city || a.county || '';
-    } catch (err) {
-      if (err.name === 'AbortError') return;   // มีรอบใหม่มาแทนแล้ว ไม่ต้องเขียนทับ
-      pickArea = '';
-    }
-    setPickInfo(`📍 ${pickArea || 'ตำแหน่งนี้'} · ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`);
-  }, 600);
-}
-
-function setPickInfo(text) {
-  const el = $('#pickInfo');
-  if (el) el.textContent = text;
-}
-
-// ---------- ปุ่ม "ตำแหน่งของฉัน" ----------
-function locateMe() {
-  const btn = $('#btnMyLoc');
-  if (!navigator.geolocation) return toast('เครื่องนี้หาตำแหน่งอัตโนมัติไม่ได้ — เลื่อนแผนที่เอาเองได้เลย', 4200);
-
-  btn.disabled = true;
-  navigator.geolocation.getCurrentPosition(
-    (p) => {
-      btn.disabled = false;
-      pickMap.setView([p.coords.latitude, p.coords.longitude], 17);
-    },
-    (err) => {
-      btn.disabled = false;
-      toast(err.code === err.PERMISSION_DENIED
-        ? 'ยังไม่ได้อนุญาตให้เข้าถึงตำแหน่ง — เปิดสิทธิ์ในเบราว์เซอร์ก่อน'
-        : 'หาตำแหน่งไม่สำเร็จ ลองใหม่อีกครั้ง', 4200);
-    },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-  );
-}
-
-// ---------- ปุ่ม "ค้นหาในแผนที่" — พิมพ์ที่อยู่แล้วให้แผนที่เลื่อนไปให้ ----------
-async function findAddress() {
-  const q = $('#addrInput').value.trim();
-  if (!q) return toast('พิมพ์ที่อยู่ก่อน แล้วค่อยกดค้นหา');
-
-  const btn = $('#addrFind');
-  btn.disabled = true;
-  btn.textContent = 'กำลังค้นหา…';
-  try {
-    const r = await fetch(
-      `${NOMINATIM}/search?format=jsonv2&limit=1&countrycodes=th&accept-language=th&q=${encodeURIComponent(q)}`
-    );
-    const hits = await r.json();
-    if (!hits.length) return toast('ไม่พบที่อยู่นี้ — ลองพิมพ์สั้นลง เช่น ชื่อซอย/ถนน หรือเลื่อนแผนที่เอง', 4600);
-    pickMap.setView([Number(hits[0].lat), Number(hits[0].lon)], 17);
-    toast('เลื่อนแผนที่ให้แล้ว — ปรับหมุดให้ตรงบ้านอีกที');
-  } catch {
-    toast('ค้นหาไม่สำเร็จ ลองใหม่อีกครั้ง');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'ค้นหาในแผนที่';
-  }
 }
 
 // ==========================================================
