@@ -217,4 +217,51 @@ router.post('/:id/complete', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- ยกเลิกงาน (ใช้ได้ทั้งงานโพส + งานจ้างตรง เพราะอยู่ตาราง jobs เดียวกัน) ----------
+// ก่อนจับคู่ (open/offered) → ถอนทิ้งเลย ไม่เก็บประวัติ (ลบแถว) — เฉพาะฝั่งผู้ว่าจ้าง
+// หลังจับคู่ (matched)      → ต้องมีเหตุผล เก็บเป็น cancelled ไว้ในประวัติ — ผู้ว่าจ้าง หรือแคร์กิฟเวอร์ที่รับงาน
+router.post('/:id/cancel', requireAuth, async (req, res) => {
+  const [jobs] = await db.query('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
+  const job = jobs[0];
+  if (!job) return res.status(404).json({ error: 'ไม่พบงานนี้' });
+
+  const isEmployer = job.employer_id === req.user.id;
+  const isWorker = job.assigned_caregiver_id === req.user.id || job.target_caregiver_id === req.user.id;
+  if (!isEmployer && !isWorker) return res.status(403).json({ error: 'ยกเลิกงานนี้ไม่ได้ — ไม่ใช่งานของคุณ' });
+
+  // ก่อนจับคู่ → ถอนทิ้ง ไม่เก็บประวัติ (แคร์กิฟเวอร์ยังไม่ผูกกับงาน ให้ถอนได้เฉพาะผู้ว่าจ้าง)
+  if (job.status === 'open' || job.status === 'offered') {
+    if (!isEmployer) return res.status(403).json({ error: 'ยังไม่ได้ตอบรับงาน — ถอนได้เฉพาะฝั่งผู้ว่าจ้าง' });
+    await db.query('DELETE FROM jobs WHERE id = ?', [job.id]);
+    return res.json({ ok: true, deleted: true });
+  }
+
+  // หลังจับคู่ → ต้องมีเหตุผล เก็บลงประวัติ
+  if (job.status === 'matched') {
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'ต้องบอกเหตุผลในการยกเลิกงานที่จับคู่แล้ว' });
+    await db.query(
+      "UPDATE jobs SET status = 'cancelled', cancel_reason = ?, cancelled_by = ? WHERE id = ?",
+      [reason.slice(0, 500), req.user.id, job.id]
+    );
+    return res.json({ ok: true, status: 'cancelled' });
+  }
+
+  return res.status(400).json({ error: 'งานนี้จบไปแล้ว ยกเลิกไม่ได้' });
+});
+
+// ---------- แคร์กิฟเวอร์: ถอนคำขอรับงาน (ก่อนผู้ว่าจ้างเลือก) — ไม่เก็บประวัติ ----------
+router.post('/:id/withdraw', requireAuth, async (req, res) => {
+  const [apps] = await db.query(
+    'SELECT * FROM job_applications WHERE job_id = ? AND caregiver_id = ?',
+    [req.params.id, req.user.id]
+  );
+  const app = apps[0];
+  if (!app) return res.status(404).json({ error: 'ไม่พบคำขอรับงานนี้' });
+  if (app.status !== 'pending') return res.status(400).json({ error: 'คำขอนี้ถูกตัดสินไปแล้ว ถอนไม่ได้' });
+
+  await db.query('DELETE FROM job_applications WHERE id = ?', [app.id]);
+  res.json({ ok: true });
+});
+
 module.exports = router;

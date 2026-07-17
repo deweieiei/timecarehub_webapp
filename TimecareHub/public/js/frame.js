@@ -96,6 +96,39 @@ function toast(text, ms = 2800) {
   toast._t = setTimeout(() => t.classList.add('hide'), ms);
 }
 
+// ---------- ยกเลิกงาน (ใช้ร่วมทั้งฝั่งผู้ว่าจ้างและแคร์กิฟเวอร์) ----------
+// ก่อนจับคู่ = ถอนทิ้ง ถามยืนยันเฉย ๆ ไม่ต้องมีเหตุผล ไม่เก็บประวัติ
+async function cancelBeforeMatch(jobId, confirmMsg, onDone) {
+  if (!confirm(confirmMsg)) return;
+  try {
+    await api(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    toast('ยกเลิกแล้ว');
+    onDone?.();
+  } catch (e) { toast(e.message, 4200); }
+}
+
+// แคร์กิฟเวอร์ถอนคำขอรับงาน (ก่อนผู้ว่าจ้างเลือก) — ไม่เก็บประวัติ
+async function withdrawApplication(jobId, onDone) {
+  if (!confirm('ยกเลิกคำขอรับงานนี้?')) return;
+  try {
+    await api(`/api/jobs/${jobId}/withdraw`, { method: 'POST' });
+    toast('ยกเลิกคำขอแล้ว');
+    onDone?.();
+  } catch (e) { toast(e.message, 4200); }
+}
+
+// หลังจับคู่ = ต้องบอกเหตุผล → เก็บลงประวัติ (อีกฝ่ายเห็นเหตุผล)
+async function cancelAfterMatch(jobId, onDone) {
+  const reason = prompt('ยกเลิกงานนี้เพราะอะไร?\nอีกฝ่ายจะเห็นเหตุผลนี้ในประวัติ');
+  if (reason === null) return;                       // กด Cancel บน prompt
+  if (!reason.trim()) return toast('ต้องบอกเหตุผลในการยกเลิก');
+  try {
+    await api(`/api/jobs/${jobId}/cancel`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
+    toast('ยกเลิกงานแล้ว — ย้ายไปที่ประวัติ');
+    onDone?.();
+  } catch (e) { toast(e.message, 4200); }
+}
+
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 const fmtBaht = (n) => Number(n).toLocaleString('th-TH');
 const fmtTime = (s) => new Date(s).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });

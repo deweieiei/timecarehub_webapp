@@ -350,18 +350,24 @@ async function viewApplied() {
     api('/api/jobs/mine'),
   ]);
 
-  const st = {
-    pending: ['pending', 'รอผู้ว่าจ้างเลือก'],
-    accepted: ['approved', 'ได้รับเลือกแล้ว ✓'],
-    rejected: ['rejected', 'ไม่ได้รับเลือก'],
-  };
-
-  // แยกคำขอจ้างตรงเป็น 2 กอง:
-  //   active  = ที่ยังต้องจัดการ (รอตอบรับ / จับคู่แล้วกำลังคุยงาน)
-  //   history = ที่จบแล้ว (งานเสร็จ / ปฏิเสธไป) → ย้ายลงกล่อง "ประวัติ" ท้ายหน้า ไม่รกกองงานจริง
-  const active = offers.filter((o) => o.status === 'offered' || o.status === 'matched');
-  const history = offers.filter((o) => o.status === 'done' || o.status === 'declined');
+  // ----- คำขอจ้างตรง: แยกที่ยังต้องจัดการ ออกจากที่จบแล้ว -----
+  //   active  = รอตอบรับ / จับคู่แล้วกำลังคุยงาน
+  //   จบแล้ว   = งานเสร็จ / ปฏิเสธ / ยกเลิก → ลงกล่อง "ประวัติ"
+  const OFFER_DONE = ['done', 'declined', 'cancelled'];
+  const offerActive = offers.filter((o) => !OFFER_DONE.includes(o.status));
+  const offerHistory = offers.filter((o) => OFFER_DONE.includes(o.status));
   const waiting = offers.filter((o) => o.status === 'offered').length;
+
+  // ----- งานที่ไปกดขอรับ: จบแล้ว = ผู้ว่าจ้างไม่เลือก / งานเสร็จ / งานถูกยกเลิก -----
+  const appliedDone = (j) => j.my_application_status === 'rejected' || j.status === 'done' || j.status === 'cancelled';
+  const applyActive = applied.filter((j) => !appliedDone(j));
+  const applyHistory = applied.filter(appliedDone);
+
+  // ประวัติรวม 2 ฝั่ง — เรียงใหม่ล่าสุดขึ้นก่อน (ทั้งคู่มี created_at)
+  const historyCards = [
+    ...offerHistory.map((o) => ({ at: o.created_at, html: offerCard(o) })),
+    ...applyHistory.map((j) => ({ at: j.created_at, html: appliedCard(j) })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
   // เก็บ offer ทั้งหมดไว้เปิดแผ่นรายละเอียด (ปุ่ม "ดูรายละเอียดงาน") — ค้นด้วย id
   const offerById = Object.fromEntries(offers.map((o) => [o.id, o]));
@@ -371,33 +377,18 @@ async function viewApplied() {
     <p class="sub">คำขอจ้างที่ส่งมาหาคุณ และงานที่คุณไปกดขอรับไว้</p>
 
     <h3 style="font-size:16px;margin:18px 0 10px">
-      คำขอจ้างตรง (${active.length})
+      คำขอจ้างตรง (${offerActive.length})
       ${waiting ? `<span class="badge badge-pending" style="margin-left:6px">ใหม่ ${waiting}</span>` : ''}
     </h3>
-    ${active.length ? active.map(offerCard).join('') : emptyBox('ยังไม่มีใครส่งคำขอจ้างมา')}
+    ${offerActive.length ? offerActive.map(offerCard).join('') : emptyBox('ยังไม่มีใครส่งคำขอจ้างมา')}
 
-    <h3 style="font-size:16px;margin:22px 0 10px">งานที่ขอรับไว้ (${applied.length})</h3>
-    ${applied.length ? applied.map((j) => `
-      <div class="job">
-        <div class="job-top">
-          <div style="flex:1;min-width:0">
-            <h3>${esc(j.title)}</h3>
-            <div style="margin-top:6px">
-              <span class="badge badge-${st[j.my_application_status][0]}">${st[j.my_application_status][1]}</span>
-            </div>
-          </div>
-          <div class="price">${fmtBaht(j.budget)}<small>${UNIT_TH[j.budget_unit]}</small></div>
-        </div>
-        <div class="meta">
-          <span class="chip">👤 ${esc(j.employer_name)}</span>
-          <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
-        </div>
-      </div>`).join('')
+    <h3 style="font-size:16px;margin:22px 0 10px">งานที่ขอรับไว้ (${applyActive.length})</h3>
+    ${applyActive.length ? applyActive.map(appliedCard).join('')
       : emptyBox('ยังไม่ได้ขอรับงานไหน<br>ไปที่แท็บ "หางาน"')}
 
-    ${history.length ? `
-      <h3 style="font-size:16px;margin:22px 0 10px">ประวัติ (${history.length})</h3>
-      ${history.map(offerCard).join('')}
+    ${historyCards.length ? `
+      <h3 style="font-size:16px;margin:22px 0 10px">ประวัติ (${historyCards.length})</h3>
+      ${historyCards.map((c) => c.html).join('')}
     ` : ''}`;
 
   $$('[data-accept]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => respond(b.dataset.accept, 'accept'))));
@@ -406,10 +397,57 @@ async function viewApplied() {
     withSpin(e.currentTarget, () => respond(b.dataset.decline, 'decline'));
   }));
   $$('[data-detail]', view).forEach((b) => (b.onclick = () => openOfferSheet(offerById[b.dataset.detail])));
+  // ถอนคำขอรับงาน (ก่อนผู้ว่าจ้างเลือก) — ไม่เก็บประวัติ
+  $$('[data-withdraw]', view).forEach((b) => (b.onclick = (e) =>
+    withSpin(e.currentTarget, () => withdrawApplication(b.dataset.withdraw, viewApplied))));
+  // ยกเลิกงานที่จับคู่แล้ว — ต้องมีเหตุผล เก็บลงประวัติ
+  $$('[data-cancel-job]', view).forEach((b) => (b.onclick = (e) =>
+    withSpin(e.currentTarget, () => cancelAfterMatch(b.dataset.cancelJob, viewApplied))));
   $$('[data-chatjob]', view).forEach((b) => (b.onclick = () => {
     go('chat', CAREGIVER_VIEWS);
     setTimeout(() => openChat(b.dataset.chatjob, b.dataset.other), 250);
   }));
+}
+
+// การ์ดงานที่แคร์กิฟเวอร์ไปกดขอรับไว้ (ระบบโพสงาน)
+function appliedCard(j) {
+  const st = {
+    pending: ['pending', 'รอผู้ว่าจ้างเลือก'],
+    accepted: ['approved', 'ได้รับเลือกแล้ว ✓'],
+    rejected: ['rejected', 'ไม่ได้รับเลือก'],
+  };
+  // งานจบ/ถูกยกเลิก → ป้ายให้ดูจากสถานะงาน ไม่ใช่สถานะใบสมัคร
+  const badge = j.status === 'done' ? ['done', 'งานเสร็จแล้ว']
+    : j.status === 'cancelled' ? ['cancelled', 'ยกเลิกแล้ว']
+    : st[j.my_application_status];
+
+  const isPending = j.my_application_status === 'pending' && j.status === 'open';
+  const isWorking = j.my_application_status === 'accepted' && j.status === 'matched';
+
+  return `
+    <div class="job">
+      <div class="job-top">
+        <div style="flex:1;min-width:0">
+          <h3>${esc(j.title)}</h3>
+          <div style="margin-top:6px">
+            <span class="badge badge-${badge[0]}">${badge[1]}</span>
+          </div>
+        </div>
+        <div class="price">${fmtBaht(j.budget)}<small>${UNIT_TH[j.budget_unit]}</small></div>
+      </div>
+      <div class="meta">
+        <span class="chip">👤 ${esc(j.employer_name)}</span>
+        <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
+      </div>
+      ${j.status === 'cancelled' && j.cancel_reason
+        ? `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 เหตุผลที่ยกเลิก: ${esc(j.cancel_reason)}</p>` : ''}
+      ${(isPending || isWorking) ? `
+        <div class="job-actions">
+          ${isWorking ? `<button class="btn btn-sm btn-ghost" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>` : ''}
+          ${isPending ? `<button class="btn btn-sm btn-ghost" data-withdraw="${j.id}">ยกเลิกคำขอ</button>` : ''}
+          ${isWorking ? `<button class="btn btn-sm btn-ghost" data-cancel-job="${j.id}">ยกเลิกงาน</button>` : ''}
+        </div>` : ''}
+    </div>`;
 }
 
 function offerCard(j) {
@@ -434,13 +472,17 @@ function offerCard(j) {
       </div>
       ${j.elder_condition ? `<p style="margin-top:10px;font-size:14px">${esc(j.elder_condition)}</p>` : ''}
       ${j.tasks ? `<p style="margin-top:4px;font-size:14px;color:var(--muted)">${esc(j.tasks)}</p>` : ''}
+      ${j.status === 'cancelled' && j.cancel_reason
+        ? `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 เหตุผลที่ยกเลิก: ${esc(j.cancel_reason)}</p>` : ''}
 
       <div class="job-actions">
         <button class="btn btn-sm btn-ghost" data-detail="${j.id}">ดูรายละเอียดงาน</button>
         ${isNew ? `
           <button class="btn btn-sm btn-ghost" data-decline="${j.id}">ปฏิเสธ</button>
           <button class="btn btn-sm" data-accept="${j.id}">ตอบรับงาน</button>`
-        : isMatched ? `<button class="btn btn-sm" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>`
+        : isMatched ? `
+          <button class="btn btn-sm" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>
+          <button class="btn btn-sm btn-ghost" data-cancel-job="${j.id}">ยกเลิกงาน</button>`
         : ''}
       </div>
     </div>`;
@@ -492,6 +534,7 @@ function openOfferSheet(j) {
       ${row('สิ่งที่ต้องทำ', esc(j.tasks || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
       ${row('ช่วงเวลา', period || '<span style="color:var(--muted)">ยืดหยุ่น / ตกลงกันภายหลัง</span>')}
       ${row('ตำแหน่ง', j.address ? `📍 ${esc(j.address)}` : '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
+      ${j.status === 'cancelled' && j.cancel_reason ? row('เหตุผลที่ยกเลิก', `<span style="color:var(--red)">${esc(j.cancel_reason)}</span>`) : ''}
 
       ${isNew ? `
         <div class="sheet-actions">
@@ -500,7 +543,8 @@ function openOfferSheet(j) {
         </div>`
       : isMatched ? `
         <div class="sheet-actions">
-          <button class="btn btn-block" id="sheetChat">💬 คุยกับผู้ว่าจ้าง</button>
+          <button class="btn" id="sheetChat">💬 คุยกับผู้ว่าจ้าง</button>
+          <button class="btn btn-ghost" id="sheetCancel">ยกเลิกงาน</button>
         </div>`
       : ''}
     </div>`;
@@ -525,6 +569,8 @@ function openOfferSheet(j) {
     go('chat', CAREGIVER_VIEWS);
     setTimeout(() => openChat(j.id, j.employer_id), 250);
   });
+  backdrop.querySelector('#sheetCancel')?.addEventListener('click', (e) =>
+    withSpin(e.currentTarget, () => cancelAfterMatch(j.id, () => { closeSheet(); viewApplied(); })));
 }
 
 async function respond(jobId, decision) {

@@ -610,16 +610,27 @@ async function viewMyJobs() {
     api('/api/hires/sent'),
   ]);
 
+  // แยกงานที่ยังดำเนินอยู่ ออกจากงานที่จบแล้ว (เสร็จ/ยกเลิก/ปฏิเสธ) → กองหลังลงกล่อง "ประวัติ"
+  const DONE = ['done', 'cancelled', 'declined'];
+  const hiresActive = hires.filter((j) => !DONE.includes(j.status));
+  const postedActive = posted.filter((j) => !DONE.includes(j.status));
+  const history = [...hires.filter((j) => DONE.includes(j.status)), ...posted.filter((j) => DONE.includes(j.status))];
+
   view.innerHTML = `
     <h2>งานของฉัน</h2>
     <p class="sub">คำขอจ้างที่ส่งไป และงานที่โพสไว้</p>
 
-    ${hires.length ? `
-      <h3 style="font-size:16px;margin:18px 0 10px">คำขอจ้างที่ส่งไป (${hires.length})</h3>
-      ${hires.map(hireCard).join('')}` : ''}
+    ${hiresActive.length ? `
+      <h3 style="font-size:16px;margin:18px 0 10px">คำขอจ้างที่ส่งไป (${hiresActive.length})</h3>
+      ${hiresActive.map(hireCard).join('')}` : ''}
 
-    <h3 style="font-size:16px;margin:22px 0 10px">งานที่โพสไว้ (${posted.length})</h3>
-    ${posted.length ? posted.map(jobCard).join('') : emptyBox('ยังไม่ได้โพสงาน')}`;
+    <h3 style="font-size:16px;margin:22px 0 10px">งานที่โพสไว้ (${postedActive.length})</h3>
+    ${postedActive.length ? postedActive.map(jobCard).join('') : emptyBox('ยังไม่ได้โพสงาน')}
+
+    ${history.length ? `
+      <h3 style="font-size:16px;margin:22px 0 10px">ประวัติ (${history.length})</h3>
+      ${history.map((j) => (j.hire_type === 'direct' ? hireCard(j) : jobCard(j))).join('')}
+    ` : ''}`;
 
   $$('[data-applicants]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => showApplicants(b.dataset.applicants))));
   $$('[data-complete]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, async () => {
@@ -629,10 +640,25 @@ async function viewMyJobs() {
       viewMyJobs();
     } catch (err) { toast(err.message); }
   })));
+  // ยกเลิกก่อนจับคู่ = ถอนทิ้ง ไม่เก็บประวัติ (offered = คำขอจ้าง, open = ประกาศงาน)
+  $$('[data-cancel-offer]', view).forEach((b) => (b.onclick = (e) =>
+    withSpin(e.currentTarget, () => cancelBeforeMatch(b.dataset.cancelOffer, 'ยกเลิกคำขอจ้างนี้? (ยังไม่ถูกตอบรับ จะไม่เก็บลงประวัติ)', viewMyJobs))));
+  $$('[data-cancel-open]', view).forEach((b) => (b.onclick = (e) =>
+    withSpin(e.currentTarget, () => cancelBeforeMatch(b.dataset.cancelOpen, 'ยกเลิกประกาศงานนี้? ผู้สมัครทั้งหมดจะถูกลบ และจะไม่เก็บลงประวัติ', viewMyJobs))));
+  // ยกเลิกหลังจับคู่ = ต้องมีเหตุผล เก็บลงประวัติ
+  $$('[data-cancel-job]', view).forEach((b) => (b.onclick = (e) =>
+    withSpin(e.currentTarget, () => cancelAfterMatch(b.dataset.cancelJob, viewMyJobs))));
   $$('[data-chatjob]', view).forEach((b) => (b.onclick = () => {
     go('chat', EMPLOYER_VIEWS);
     setTimeout(() => openChat(b.dataset.chatjob, b.dataset.other), 250);
   }));
+}
+
+// ป้ายเหตุผลที่ยกเลิก — โชว์เฉพาะงานที่ถูกยกเลิกหลังจับคู่ (มีเหตุผลเก็บไว้)
+function cancelReasonNote(j) {
+  return j.status === 'cancelled' && j.cancel_reason
+    ? `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 เหตุผลที่ยกเลิก: ${esc(j.cancel_reason)}</p>`
+    : '';
 }
 
 // การ์ดคำขอจ้างตรง
@@ -653,9 +679,13 @@ function hireCard(j) {
         <span class="chip">จ้างตรง</span>
         <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
       </div>
+      ${cancelReasonNote(j)}
       <div class="job-actions">
-        <button class="btn btn-sm btn-ghost" data-chatjob="${j.id}" data-other="${j.target_caregiver_id}">💬 คุยกับเขา</button>
+        ${(j.status === 'offered' || j.status === 'matched')
+          ? `<button class="btn btn-sm btn-ghost" data-chatjob="${j.id}" data-other="${j.target_caregiver_id}">💬 คุยกับเขา</button>` : ''}
         ${j.status === 'matched' ? `<button class="btn btn-sm btn-amber" data-complete="${j.id}">งานเสร็จแล้ว</button>` : ''}
+        ${j.status === 'offered' ? `<button class="btn btn-sm btn-ghost" data-cancel-offer="${j.id}">ยกเลิกคำขอ</button>` : ''}
+        ${j.status === 'matched' ? `<button class="btn btn-sm btn-ghost" data-cancel-job="${j.id}">ยกเลิกงาน</button>` : ''}
       </div>
     </div>`;
 }
@@ -680,9 +710,12 @@ function jobCard(j) {
         <span class="chip">📍 ${esc(j.area_label || '-')}</span>
         <span class="chip">👤 ${j.applicant_count} คนขอรับ</span>
       </div>
+      ${cancelReasonNote(j)}
       <div class="job-actions">
         ${j.status === 'open' ? `<button class="btn btn-sm" data-applicants="${j.id}">ดูผู้สมัคร (${j.applicant_count})</button>` : ''}
+        ${j.status === 'open' ? `<button class="btn btn-sm btn-ghost" data-cancel-open="${j.id}">ยกเลิกประกาศ</button>` : ''}
         ${j.status === 'matched' ? `<button class="btn btn-sm btn-amber" data-complete="${j.id}">งานเสร็จแล้ว</button>` : ''}
+        ${j.status === 'matched' ? `<button class="btn btn-sm btn-ghost" data-cancel-job="${j.id}">ยกเลิกงาน</button>` : ''}
       </div>
     </div>`;
 }
