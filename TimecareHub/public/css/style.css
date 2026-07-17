@@ -83,7 +83,30 @@ body {
   width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
   background: rgba(255, 255, 255, .22); color: #fff;
   display: grid; place-items: center; font-weight: 700; font-size: 16px;
+  overflow: hidden;   /* รูปเป็นสี่เหลี่ยม — ครอบให้กลมตามกรอบ */
 }
+/* มีรูปจริงก็ให้รูปเต็มวง (object-fit:cover = ไม่บิดสัดส่วน ตัดส่วนเกินทิ้ง) */
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ขนาดใหญ่ขึ้นสำหรับการ์ด/หน้าโปรไฟล์ — พื้นหลังเทียลเวลาไม่มีรูป */
+.avatar-lg, .avatar-xl {
+  background: linear-gradient(135deg, var(--teal), var(--teal-dark));
+}
+.avatar-lg { width: 52px; height: 52px; font-size: 20px; }
+.avatar-xl { width: 64px; height: 64px; font-size: 25px; }
+
+/* ---------- กล่องเลือกรูปโปรไฟล์ ---------- */
+.photo-pick { display: flex; align-items: center; gap: 16px; }
+.photo-preview {
+  width: 76px; height: 76px; font-size: 30px; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--teal), var(--teal-dark));
+}
+.photo-pick-actions { flex: 1; min-width: 0; }
+.photo-pick-actions .btn { margin-right: 8px; }
+.photo-pick-actions .hint { margin-top: 8px; }
+
+/* หน้าบัตร — หัวการ์ด รูป+ชื่อ+เรตเรียงแถวเดียว */
+.cg-hero { display: flex; align-items: center; gap: 14px; }
 
 .role-chip {
   font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
@@ -341,8 +364,10 @@ input[type=file] { padding: 10px; font-size: 14px; }
 /* ============================================================
    แผนที่
    ============================================================ */
-#map, #pickMap { height: 340px; border-radius: var(--r); z-index: 1; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+#map, #pickMap, #cardMap { height: 340px; border-radius: var(--r); z-index: 1; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
 #pickMap { height: 260px; }
+#pickMap.tall { height: 320px; }   /* หน้าหาคนดูแล: หมุด+วงรัศมี+หมุดคน อยู่บนแผนที่เดียวกัน ต้องสูงขึ้น */
+#cardMap { height: 240px; }
 .leaflet-container { font-family: 'Sarabun', sans-serif; }
 .leaflet-control-attribution { font-size: 9px; }
 
@@ -465,6 +490,20 @@ input[type=file] { padding: 10px; font-size: 14px; }
 }
 /* หมุดของงานที่กดขอรับไปแล้ว */
 .pin-applied .pin-label { background: var(--muted); }
+
+/* หมุดคนที่กำลังเลือกดู (หน้าหาคนดูแล) — เด่นกว่าหมุดอื่น */
+.pin-body.sel .pin-label { background: var(--amber-dark); transform: scale(1.08); }
+.pin-body.sel { z-index: 1000; }
+
+/* ป้ายระยะห่าง — เน้นกว่า chip ปกติ เพราะเป็นข้อมูลหลักตอนเลือกคนใกล้ */
+.chip-near { background: #fef3c7; color: #b45309; font-weight: 600; }
+
+/* การ์ดคนที่เพิ่งกดหมุดมา — กะพริบครั้งเดียวให้รู้ว่าใบไหน */
+@keyframes cardFlash {
+  0%, 100% { box-shadow: 0 1px 3px rgba(0, 0, 0, .06); }
+  30%      { box-shadow: 0 0 0 3px var(--amber); }
+}
+.job.flash { animation: cardFlash 1.1s ease; }
 
 /* วงกลม (ยังไม่ผ่าน KYC) — กดได้เหมือนกัน */
 .leaflet-interactive { cursor: pointer; }

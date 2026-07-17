@@ -26,9 +26,7 @@ async function viewProfile() {
 
     <div class="card" style="background:var(--teal-light);box-shadow:none">
       <div style="display:flex;align-items:center;gap:14px">
-        <span class="avatar" style="width:54px;height:54px;font-size:21px;background:linear-gradient(135deg,var(--teal),var(--teal-dark))">
-          ${esc(initial(p.full_name))}
-        </span>
+        ${avatar(p, { cls: 'avatar-xl' })}
         <div style="flex:1;min-width:0">
           <strong style="font-size:17px">${esc(p.full_name)}</strong>
           <div class="hint" style="margin:2px 0 0">${esc(p.email)}${p.age != null ? ` · อายุ ${p.age} ปี` : ''}</div>
@@ -43,6 +41,12 @@ async function viewProfile() {
     </div>
 
     <form id="profileForm">
+      <!-- ---------- รูปโปรไฟล์ ---------- -->
+      <div class="card">
+        <h3 class="card-title">รูปโปรไฟล์</h3>
+        ${photoPickerHtml(p, 'รูปนี้แสดงบนหัวเว็บ และให้ผู้ว่าจ้าง/แคร์กิฟเวอร์ที่คุยด้วยเห็น')}
+      </div>
+
       <!-- ---------- ข้อมูลส่วนตัว ---------- -->
       <div class="card">
         <h3 class="card-title">ข้อมูลส่วนตัว</h3>
@@ -221,6 +225,9 @@ async function viewProfile() {
         ${p.profile_updated_at ? `แก้ไขล่าสุด ${fmtTime(p.profile_updated_at)}` : 'ยังไม่เคยบันทึกโปรไฟล์'}
       </p>
     </form>`;
+
+  // อัปรูปทันทีที่เลือก ไม่ต้องรอกดบันทึกฟอร์ม — และให้รูปบนหัวเว็บเปลี่ยนตามด้วย
+  wirePhotoPicker({ onChange: setMyPhoto });
 
   // --- อายุอัปเดตสดตอนเลือกวันเกิด ---
   $('#birthDate').oninput = (e) => {

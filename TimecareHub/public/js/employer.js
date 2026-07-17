@@ -38,8 +38,8 @@ async function viewBrowse() {
       <button type="button" data-bmode="all">👥 ดูทั้งหมด</button>
     </div>
 
-    <div class="card" id="pinCard">
-      <div class="field">
+    <div class="card pin-only">
+      <div class="field" style="margin:0">
         <label>จะให้ไปดูแลที่ไหน</label>
         <div class="row" style="align-items:center">
           <input id="placeFind" placeholder="ลาดพร้าว 15 · MRT ห้วยขวาง · รพ.รามคำแหง">
@@ -47,11 +47,13 @@ async function viewBrowse() {
         </div>
         <p class="hint">พิมพ์แล้วกดค้นหา แผนที่จะเลื่อนไปให้ · หรือกดปุ่ม ◎ ใช้ตำแหน่งเครื่องก็ได้</p>
       </div>
+    </div>
 
-      <p id="browsePinInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงกับบ้าน</p>
-      ${pickerBox({ tall: true })}
+    <div class="card">
+      <p id="browsePinInfo" class="hint pin-only" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงกับบ้าน</p>
+      <div id="browseMapWrap">${pickerBox({ tall: true })}</div>
 
-      <div class="row" style="margin-top:14px;align-items:flex-end">
+      <div class="row pin-only" style="margin-top:14px;align-items:flex-end">
         <div class="field" style="margin:0">
           <label>หาคนในรัศมี</label>
           <select id="browseRadius">
@@ -104,14 +106,23 @@ async function viewBrowse() {
 function setBrowseMode(mode) {
   if (mode === browseMode) return;
   browseMode = mode;
+  const pinMode = mode === 'pin';
 
   $$('[data-bmode]', view).forEach((b) => b.classList.toggle('on', b.dataset.bmode === mode));
-  $('#pinCard').classList.toggle('hide', mode !== 'pin');
+
+  // แผนที่ยังอยู่ทั้ง 2 โหมด (โหมดทั้งหมดก็ยังกด "ดูบนแผนที่" ได้) —
+  // ซ่อนแค่ตัวควบคุมรัศมี + หมุดกลางจอ ที่มีความหมายเฉพาะตอนหาในรัศมี
+  $$('.pin-only', view).forEach((el) => el.classList.toggle('hide', !pinMode));
+  $('#browseMapWrap').querySelector('.pick-pin').classList.toggle('hide', !pinMode);
+  drawSearchRing();   // โหมดทั้งหมด → ลบวงรัศมีทิ้ง
+
   runBrowse();
 }
 
 // ---------- หมุดขยับ → ค้นหาใหม่ ----------
 function onBrowsePinMoved({ lat, lng, area, loading }) {
+  if (browseMode !== 'pin') return;   // โหมดทั้งหมด — เลื่อนแผนที่ดูเฉย ๆ ไม่ต้องค้นหาใหม่
+
   const el = $('#browsePinInfo');
   if (el) {
     el.textContent = loading
@@ -236,7 +247,7 @@ function showOnMap(id) {
 
   markPin(id);
   browsePicker.map.setView([c.lat, c.lng], 15);
-  $('#pinCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('#browseMapWrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
   toast(`${c.full_name} รับงานแถว ${c.area_label || 'ตรงหมุดนี้'}${c.distance_km != null ? ` · ห่างจากหมุดคุณ ${c.distance_km.toFixed(1)} กม.` : ''}`, 4000);
 }
 
@@ -575,7 +586,7 @@ async function showApplicants(jobId) {
     ${items.length ? items.map((a) => `
       <div class="job">
         <div style="display:flex;gap:12px;align-items:center">
-          <div class="avatar">${esc(initial(a.full_name))}</div>
+          ${avatar(a, { cls: 'avatar-lg' })}
           <div style="flex:1;min-width:0">
             <h3>${esc(a.full_name)}</h3>
             <div class="hint" style="margin:2px 0 0">ประสบการณ์ ${a.experience_years} ปี</div>
@@ -614,8 +625,20 @@ async function showApplicants(jobId) {
 // ==========================================================
 const EMPLOYER_VIEWS = { browse: () => viewBrowse(), post: viewPost, myjobs: viewMyJobs, chat: viewChat };
 
-buildFrame({
-  role: 'employer',
-  tabs: [['browse', 'หาคนดูแล'], ['post', 'โพสงาน'], ['myjobs', 'งานของฉัน'], ['chat', 'แชท']],
-  render: EMPLOYER_VIEWS,
-});
+(async function () {
+  await buildFrame({
+    role: 'employer',
+    tabs: [['browse', 'หาคนดูแล'], ['post', 'โพสงาน'], ['myjobs', 'งานของฉัน'], ['chat', 'แชท']],
+    render: EMPLOYER_VIEWS,
+  });
+
+  // มาจากหน้าดูบัตร (/caregiver-card.html) กดปุ่ม "ส่งคำขอจ้าง" — เปิดแผ่นจ้างของคนนั้นให้เลย
+  const hireId = new URLSearchParams(location.search).get('hire');
+  if (hireId) {
+    history.replaceState(null, '', '/employer.html');   // กดรีเฟรชแล้วไม่เด้งแผ่นซ้ำ
+    try {
+      const { caregiver } = await api(`/api/caregivers/${hireId}`);
+      openHireSheet(caregiver);
+    } catch (e) { toast(e.message, 4200); }
+  }
+})();
