@@ -654,13 +654,6 @@ async function viewMyJobs() {
   }));
 }
 
-// ป้ายเหตุผลที่ยกเลิก — โชว์เฉพาะงานที่ถูกยกเลิกหลังจับคู่ (มีเหตุผลเก็บไว้)
-function cancelReasonNote(j) {
-  return j.status === 'cancelled' && j.cancel_reason
-    ? `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 เหตุผลที่ยกเลิก: ${esc(j.cancel_reason)}</p>`
-    : '';
-}
-
 // การ์ดคำขอจ้างตรง
 function hireCard(j) {
   return `

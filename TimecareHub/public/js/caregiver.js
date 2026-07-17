@@ -439,8 +439,7 @@ function appliedCard(j) {
         <span class="chip">👤 ${esc(j.employer_name)}</span>
         <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
       </div>
-      ${j.status === 'cancelled' && j.cancel_reason
-        ? `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 เหตุผลที่ยกเลิก: ${esc(j.cancel_reason)}</p>` : ''}
+      ${cancelReasonNote(j)}
       ${(isPending || isWorking) ? `
         <div class="job-actions">
           ${isWorking ? `<button class="btn btn-sm btn-ghost" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>` : ''}
@@ -472,8 +471,7 @@ function offerCard(j) {
       </div>
       ${j.elder_condition ? `<p style="margin-top:10px;font-size:14px">${esc(j.elder_condition)}</p>` : ''}
       ${j.tasks ? `<p style="margin-top:4px;font-size:14px;color:var(--muted)">${esc(j.tasks)}</p>` : ''}
-      ${j.status === 'cancelled' && j.cancel_reason
-        ? `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 เหตุผลที่ยกเลิก: ${esc(j.cancel_reason)}</p>` : ''}
+      ${cancelReasonNote(j)}
 
       <div class="job-actions">
         <button class="btn btn-sm btn-ghost" data-detail="${j.id}">ดูรายละเอียดงาน</button>
@@ -534,7 +532,8 @@ function openOfferSheet(j) {
       ${row('สิ่งที่ต้องทำ', esc(j.tasks || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
       ${row('ช่วงเวลา', period || '<span style="color:var(--muted)">ยืดหยุ่น / ตกลงกันภายหลัง</span>')}
       ${row('ตำแหน่ง', j.address ? `📍 ${esc(j.address)}` : '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
-      ${j.status === 'cancelled' && j.cancel_reason ? row('เหตุผลที่ยกเลิก', `<span style="color:var(--red)">${esc(j.cancel_reason)}</span>`) : ''}
+      ${j.status === 'cancelled' && j.cancel_reason
+        ? row('ยกเลิกโดย', `<span style="color:var(--red)">${cancelledByLabel(j) || '-'} — ${esc(j.cancel_reason)}</span>`) : ''}
 
       ${isNew ? `
         <div class="sheet-actions">

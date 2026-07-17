@@ -129,6 +129,23 @@ async function cancelAfterMatch(jobId, onDone) {
   } catch (e) { toast(e.message, 4200); }
 }
 
+// ใครเป็นคนยกเลิกงาน — "คุณ" ถ้าเป็นตัวเราเอง ไม่งั้นบอกบทบาท (+ ชื่อถ้ามีในข้อมูลการ์ด)
+function cancelledByLabel(j) {
+  if (j.cancelled_by == null) return '';
+  if (ME && Number(j.cancelled_by) === Number(ME.id)) return 'คุณ';
+  const byEmployer = Number(j.cancelled_by) === Number(j.employer_id);
+  const role = byEmployer ? 'ผู้ว่าจ้าง' : 'แคร์กิฟเวอร์';
+  const name = byEmployer ? j.employer_name : j.caregiver_name;   // ชื่ออีกฝ่าย (มีบ้างไม่มีบ้างแล้วแต่การ์ด)
+  return name ? `${role} (${esc(name)})` : role;
+}
+
+// ป้ายเหตุผลที่ยกเลิก — โชว์เฉพาะงานที่ถูกยกเลิกหลังจับคู่ (มีเหตุผลเก็บไว้)
+function cancelReasonNote(j) {
+  if (j.status !== 'cancelled' || !j.cancel_reason) return '';
+  const by = cancelledByLabel(j);
+  return `<p style="margin-top:8px;font-size:13px;color:var(--red)">🚫 ${by ? `ยกเลิกโดย${by} — ` : ''}${esc(j.cancel_reason)}</p>`;
+}
+
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 const fmtBaht = (n) => Number(n).toLocaleString('th-TH');
 const fmtTime = (s) => new Date(s).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
