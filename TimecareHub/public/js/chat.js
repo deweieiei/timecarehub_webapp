@@ -157,6 +157,11 @@ async function openChat(jobId, otherId, name, title) {
   closeChat();
   curChat = { jobId: Number(jobId), otherId: Number(otherId), name };
 
+  // ปุ่มมุมขวาบนหัวห้อง — แล้วแต่บทบาท: แคร์กิฟเวอร์ดูรายละเอียดงาน / ผู้ว่าจ้างดูบัตรแคร์กิฟเวอร์
+  const ctx = ME.active_role === 'employer'
+    ? { icon: ICONS.kyc, label: 'ดูบัตรแคร์กิฟเวอร์' }
+    : { icon: ICONS.applied, label: 'ดูรายละเอียดงาน' };
+
   const room = document.createElement('div');
   room.className = 'chat-room';
   room.innerHTML = `
@@ -170,6 +175,7 @@ async function openChat(jobId, otherId, name, title) {
         <strong>${esc(name)}</strong>
         <small id="chatStatus">${esc(title || '')}</small>
       </div>
+      <button class="icon-btn" id="chatContext" title="${ctx.label}" aria-label="${ctx.label}">${ctx.icon}</button>
     </div>
 
     <div class="chat-msgs" id="chatMsgs"></div>
@@ -186,6 +192,8 @@ async function openChat(jobId, otherId, name, title) {
     closeChat();
     if (TAB === 'chat') viewChat();
   };
+
+  $('#chatContext', room).onclick = (e) => withSpin(e.currentTarget, () => openChatContext());
 
   $('#chatForm', room).onsubmit = (e) => {
     e.preventDefault();
@@ -207,6 +215,78 @@ async function openChat(jobId, otherId, name, title) {
   };
 
   await loadMsgs();
+}
+
+// ============================================================
+//  ปุ่มบนหัวห้องแชท — ดูรายละเอียดงาน (แคร์กิฟเวอร์) / ดูบัตรแคร์กิฟเวอร์ (ผู้ว่าจ้าง)
+// ============================================================
+async function openChatContext() {
+  if (!curChat) return;
+
+  // ผู้ว่าจ้าง → เปิดบัตรแคร์กิฟเวอร์ที่กำลังคุย (ฟังก์ชันอยู่ใน employer.js)
+  if (ME.active_role === 'employer') {
+    if (typeof openCardSheet === 'function') return openCardSheet(curChat.otherId);
+    return;
+  }
+
+  // แคร์กิฟเวอร์ → เปิดรายละเอียดงานที่กำลังคุย
+  try {
+    const { job } = await api(`/api/jobs/${curChat.jobId}`);
+    openChatJobSheet(job);
+  } catch (e) { toast(e.message, 4200); }
+}
+
+// แผ่นรายละเอียดงาน (อ่านอย่างเดียว — กำลังคุยกันอยู่แล้ว ไม่ต้องมีปุ่มรับ/ขอรับงาน)
+function openChatJobSheet(j) {
+  if (!j) return;
+  document.querySelector('.sheet-backdrop')?.remove();
+
+  const row = (k, v) => (v ? `<div class="sheet-row"><div class="k">${k}</div><div class="v">${v}</div></div>` : '');
+  const period = [j.start_date, j.end_date]
+    .filter(Boolean)
+    .map((d) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }))
+    .join(' – ');
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <h3>${esc(j.title)}</h3>
+        <button class="sheet-close" aria-label="ปิด">✕</button>
+      </div>
+
+      <div class="meta" style="margin-top:8px">
+        <span class="badge badge-${j.status}">${STATUS_TH[j.status] || esc(j.status)}</span>
+        <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
+        <span class="chip">${j.hire_type === 'direct' ? 'จ้างตรง' : 'งานโพส'}</span>
+      </div>
+
+      <div class="sheet-price">
+        <b>฿${fmtBaht(j.budget)}</b>
+        <span>${UNIT_TH[j.budget_unit]}</span>
+        <span style="margin-left:auto;font-size:12.5px">งบตั้งต้น — ต่อรองในแชทได้</span>
+      </div>
+
+      ${row('ผู้ว่าจ้าง', esc(j.employer_name || '-'))}
+      ${row('อาการผู้สูงอายุ', esc(j.elder_condition || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
+      ${row('สิ่งที่ต้องทำ', esc(j.tasks || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
+      ${row('ช่วงเวลา', period || '<span style="color:var(--muted)">ยืดหยุ่น / ตกลงกันภายหลัง</span>')}
+      ${row('ตำแหน่ง', j.address
+        ? `📍 ${esc(j.address)}`
+        : (j.area_label ? `📍 ${esc(j.area_label)} (โดยประมาณ)` : '<span style="color:var(--muted)">ไม่ได้ระบุ</span>'))}
+      ${j.status === 'cancelled' && j.cancel_reason
+        ? row('ยกเลิกโดย', `<span style="color:var(--red)">${cancelledByLabel(j) || '-'} — ${esc(j.cancel_reason)}</span>`) : ''}
+    </div>`;
+
+  document.body.appendChild(backdrop);
+
+  const close = () => backdrop.remove();
+  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
+  backdrop.querySelector('.sheet-close').onclick = close;
+  const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+  document.addEventListener('keydown', onEsc);
 }
 
 // โหลดหน้าล่าสุดของห้อง — ใช้ตอนเปิดห้อง และตอน socket กลับมาต่อติดหลังเน็ตหลุด
