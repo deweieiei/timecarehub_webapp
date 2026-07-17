@@ -91,13 +91,32 @@ async function messageById(id) {
   return rows[0] || null;
 }
 
-// บันทึกข้อความ → คืน row เต็มกลับไป (ทั้ง REST และ socket ใช้ตัวนี้)
-async function insertMessage({ jobId, from, to, kind = 'text', body = null, imagePath = null, imageW = null, imageH = null }) {
-  const [r] = await db.query(
-    'INSERT INTO messages (job_id, sender_id, receiver_id, kind, body, image_path, image_w, image_h) VALUES (?,?,?,?,?,?,?,?)',
-    [jobId, from, to, kind, body, imagePath, imageW, imageH]
-  );
-  return messageById(r.insertId);
+// บันทึกข้อความ → คืน row เต็มกลับไป (ทั้งรูปทาง REST และข้อความทาง socket ใช้ตัวนี้)
+//
+// ส่งซ้ำด้วย clientId เดิมได้ปลอดภัย: ชน unique (sender_id, client_id) เมื่อไหร่
+// = ของเดิมบันทึกไปแล้วตั้งแต่รอบก่อน (ack แค่หายระหว่างทาง) → คืนแถวเดิม ไม่บันทึกใหม่
+// คนเรียกดูได้จาก .duplicate ว่ารอบนี้บันทึกจริงหรือคืนของเก่า
+async function insertMessage({ jobId, from, to, kind = 'text', body = null, imagePath = null, imageW = null, imageH = null, clientId = null }) {
+  // clientId มาจากหน้าเว็บ — ตัดให้พอดีคอลัมน์ก่อน ไม่งั้นค่ายาวประหลาดทำ INSERT พังทั้งก้อน
+  const cid = clientId ? String(clientId).slice(0, 32) : null;
+
+  try {
+    const [r] = await db.query(
+      'INSERT INTO messages (job_id, sender_id, receiver_id, client_id, kind, body, image_path, image_w, image_h) VALUES (?,?,?,?,?,?,?,?,?)',
+      [jobId, from, to, cid, kind, body, imagePath, imageW, imageH]
+    );
+    return messageById(r.insertId);
+  } catch (e) {
+    if (e.code !== 'ER_DUP_ENTRY' || !cid) throw e;
+
+    const [rows] = await db.query(
+      `SELECT ${MSG_COLS} FROM messages WHERE sender_id = ? AND client_id = ?`,
+      [from, cid]
+    );
+    if (!rows[0]) throw e;   // ชน unique ตัวอื่นที่ไม่ใช่ idx_client — ไม่ใช่เคสนี้ ส่งต่อไป
+
+    return { ...rows[0], duplicate: true };
+  }
 }
 
 // ทำเครื่องหมาย "อ่านแล้ว" → คืน id ที่เพิ่งเปลี่ยน (ว่างแปลว่าอ่านหมดแล้ว ไม่ต้องแจ้งใคร)

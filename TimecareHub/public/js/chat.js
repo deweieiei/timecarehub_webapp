@@ -1,8 +1,10 @@
 // แชท — ใช้ร่วมกันทั้งฝั่งผู้ว่าจ้างและฝั่งแคร์กิฟเวอร์
 // ต้องโหลดก่อนไฟล์นี้: /socket.io/socket.io.js แล้วก็ frame.js (ใช้ ME, view, api, esc, ICONS, ...)
 //
-// ของเดิมเป็น polling ทุก 3 วิ แล้ว innerHTML ทับทั้งกล่อง — ตอนนี้เปลี่ยนเป็น Socket.IO
-// และต่อข้อความใหม่เข้าไปทีละฟอง (ไม่ล้างของเก่า) → ไม่กระพริบ ไม่ดีดสกรอลล์ ไม่ตัดคำที่กำลังเลือกอยู่
+// ข้อความวิ่งผ่าน Socket.IO ทางเดียว ไม่มีทางถอย REST แล้ว
+//   — เน็ตที่บล็อก WebSocket socket.io ถอยไปใช้ HTTP long-polling ให้เองอยู่แล้ว
+//     ทางถอยที่เขียนเองซ้ำอีกชั้นไม่ได้ช่วยอะไร มีแต่ทำให้ต้องกันยิงรัว 2 ที่ แล้ววันหนึ่งจะลืมที่นึง
+// รูปยังไปทาง HTTP POST: ไฟล์ใหญ่ยิงผ่าน WebSocket แล้วบล็อกข้อความอื่นทั้งเส้น
 
 let socket = null;
 let curChat = null;              // { jobId, otherId } — ห้องที่เปิดค้างอยู่ตอนนี้ (null = ไม่ได้เปิด)
@@ -10,9 +12,18 @@ let curChat = null;              // { jobId, otherId } — ห้องที่
 const shownIds = new Set();      // id ข้อความที่วาดไปแล้ว — กันวาดซ้ำเวลา event มาชนกับ REST
 const presence = new Map();      // userId → { online, last_seen_at }
 
+const outbox = new Map();        // client_id → ฟังก์ชันส่งซ้ำ (ฟองไหนล้ม แตะที่ฟองเพื่อยิงใหม่)
+const blobUrls = new Map();      // client_id → object URL ของรูปที่ยังส่งไม่เสร็จ (ต้องคืนหน่วยความจำเอง)
+
+let oldestId = null;             // id ฟองบนสุดที่โหลดมาแล้ว — หมุดสำหรับขอของเก่าต่อ
+let hasMore = false;             // ยังมีข้อความเก่ากว่านี้ให้โหลดอีกไหม
+let loadingOlder = false;
+
 let hideTypingTimer = null;      // ซ่อนป้าย "กำลังพิมพ์" ถ้าอีกฝั่งเงียบไป
 let typingOffTimer = null;       // บอกอีกฝั่งว่าเราหยุดพิมพ์แล้ว
 let lastTypingPing = 0;          // กันยิง event ถี่เกินตอนพิมพ์รัว ๆ
+
+const SEND_TIMEOUT = 12000;      // รอ ack นานสุดเท่านี้ แล้วถือว่าส่งไม่สำเร็จ
 
 // ============================================================
 //  ท่อสด
@@ -28,7 +39,7 @@ function initRealtime() {
   socket.on('chat:typing', onTyping);
   socket.on('presence', onPresence);
 
-  // เน็ตหลุดแล้วกลับมา = ระหว่างนั้นอาจมีข้อความที่เราพลาดไป → ดึงห้องที่เปิดอยู่ใหม่ทั้งห้อง
+  // เน็ตหลุดแล้วกลับมา = ระหว่างนั้นอาจมีข้อความที่เราพลาดไป → ดึงห้องที่เปิดอยู่ใหม่
   socket.on('connect', () => {
     if (curChat) loadMsgs();
     else if (TAB === 'chat') viewChat();
@@ -118,7 +129,16 @@ async function viewChat() {
 function closeChat() {
   if (curChat) sendTyping(false);
   curChat = null;
+
   shownIds.clear();
+  outbox.clear();
+  blobUrls.forEach((url) => URL.revokeObjectURL(url));   // ปิดห้องทั้งที่รูปยังส่งไม่เสร็จ = คืนหน่วยความจำซะ
+  blobUrls.clear();
+
+  oldestId = null;
+  hasMore = false;
+  loadingOlder = false;
+
   clearTimeout(hideTypingTimer);
   clearTimeout(typingOffTimer);
   document.querySelector('.chat-room')?.remove();
@@ -173,6 +193,11 @@ async function openChat(jobId, otherId, name, title) {
 
   $('#chatText', room).oninput = () => sendTyping(true);
 
+  // เลื่อนขึ้นเกือบสุด = ขอข้อความเก่าเพิ่มอีกหน้า
+  $('#chatMsgs', room).onscroll = (e) => {
+    if (e.target.scrollTop < 80) loadOlder();
+  };
+
   $('#chatAttach', room).onclick = () => $('#chatFile', room).click();
   $('#chatFile', room).onchange = (e) => {
     const file = e.target.files[0];
@@ -183,27 +208,70 @@ async function openChat(jobId, otherId, name, title) {
   await loadMsgs();
 }
 
-// โหลดทั้งห้องใหม่ — ใช้ตอนเปิดห้อง และตอน socket กลับมาต่อติดหลังเน็ตหลุด
+// โหลดหน้าล่าสุดของห้อง — ใช้ตอนเปิดห้อง และตอน socket กลับมาต่อติดหลังเน็ตหลุด
 async function loadMsgs() {
   const box = $('#chatMsgs');
   if (!curChat || !box) return;
 
-  try {
-    const r = await api(`/api/chat/${curChat.jobId}?with=${curChat.otherId}`);
-    if (!r || !curChat) return;
+  const chat = curChat;
 
-    setPresence(curChat.otherId, r.other_online, r.other_last_seen);
+  try {
+    const r = await api(`/api/chat/${chat.jobId}?with=${chat.otherId}`);
+    if (!r || curChat !== chat) return;
+
+    setPresence(chat.otherId, r.other_online, r.other_last_seen);
     paintChatHead();
 
-    shownIds.clear();
-    box.innerHTML = '';
-    r.items.forEach((m) => addMessage(m, { scroll: false }));
+    // ฟองที่ยังส่งไม่สำเร็จ ห้ามล้างทิ้งเด็ดขาด — ผู้ใช้ยังไม่รู้ว่ามันถึงปลายทางหรือยัง
+    // (บั๊กเดิม: เน็ตสะดุดแล้วต่อกลับ → ตรงนี้ล้างทั้งกล่อง ข้อความที่กำลังส่งหายเงียบ ๆ)
+    const keep = $$('.msg[data-tmp]', box);
 
-    if (!r.items.length) {
+    shownIds.clear();
+    box.replaceChildren();
+    r.items.forEach((m) => addMessage(m, { scroll: false }));
+    keep.forEach((el) => box.appendChild(el));   // ต่อท้ายสุดเสมอ — ยังไม่มีเลขลำดับจริงให้เรียง
+
+    hasMore = !!r.has_more;
+    oldestId = r.items[0]?.id ?? null;
+
+    if (!box.children.length) {
       box.innerHTML = '<p class="chat-hint">ยังไม่มีข้อความ — ทักทายกันก่อนเลย</p>';
     }
+    redrawDays();
     box.scrollTop = box.scrollHeight;
+
+    // server เพิ่ง mark read ให้ตอน GET — เลขแดงบนแท็บต้องหายทันที ไม่ใช่รอรอบ poll ถัดไปอีก 15 วิ
+    refreshBadges();
   } catch { /* เงียบไว้ — เดี๋ยว socket ต่อติดแล้วดึงใหม่เอง */ }
+}
+
+// เลื่อนขึ้นไปสุด = ขอของเก่าเพิ่มอีกหน้า
+async function loadOlder() {
+  const box = $('#chatMsgs');
+  if (!hasMore || loadingOlder || !curChat || !box || !oldestId) return;
+  loadingOlder = true;
+
+  const chat = curChat;
+  const heightBefore = box.scrollHeight;   // จำความสูงไว้ก่อนแทรกของเก่าเข้าไปข้างบน
+
+  try {
+    const r = await api(`/api/chat/${chat.jobId}?with=${chat.otherId}&before=${oldestId}`);
+    if (!r || curChat !== chat) return;
+
+    // ไล่จากใหม่→เก่า แล้วยัดไว้บนสุดทีละอัน → ผลลัพธ์เรียงเก่า→ใหม่เองโดยไม่ต้องคิดเลข
+    [...r.items].reverse().forEach((m) => addMessage(m, { scroll: false, top: true }));
+
+    hasMore = !!r.has_more;
+    if (r.items.length) oldestId = r.items[0].id;
+    redrawDays();
+
+    // ของเก่าที่เพิ่งแทรกดันเนื้อหาที่กำลังอ่านอยู่ให้เลื่อนลง → ชดเชยให้กลับไปอยู่ที่เดิม
+    box.scrollTop = box.scrollHeight - heightBefore;
+  } catch {
+    /* ปล่อยไว้ — เลื่อนขึ้นอีกทีค่อยลองใหม่ */
+  } finally {
+    loadingOlder = false;
+  }
 }
 
 function paintChatHead() {
@@ -239,7 +307,7 @@ function bodyHtml(m) {
   return m.local_url ? img : `<a href="/api/chat/image/${m.id}" target="_blank" rel="noopener">${img}</a>`;
 }
 
-function addMessage(m, { scroll = true } = {}) {
+function addMessage(m, { scroll = true, top = false } = {}) {
   const box = $('#chatMsgs');
   if (!box) return;
   if (m.id && shownIds.has(m.id)) return;   // มาสองทาง (ack + broadcast) → เอาอันแรกพอ
@@ -251,6 +319,12 @@ function addMessage(m, { scroll = true } = {}) {
   //   CSS.escape: client_id เป็นค่าที่ "อีกเครื่อง" สร้างมา — ยัดตรง ๆ ลง selector แล้วเจอค่าพิลึก selector จะพัง
   if (m.client_id && m.sender_id === ME.id) {
     box.querySelector(`[data-tmp="${CSS.escape(m.client_id)}"]`)?.remove();
+    outbox.delete(m.client_id);
+    const url = blobUrls.get(m.client_id);
+    if (url) {
+      URL.revokeObjectURL(url);   // ส่งถึงแล้ว รูปตัวจริงมาจาก server ต่อจากนี้
+      blobUrls.delete(m.client_id);
+    }
   }
   if (m.id) shownIds.add(m.id);
 
@@ -259,11 +333,42 @@ function addMessage(m, { scroll = true } = {}) {
   const el = document.createElement('div');
   el.className = `msg ${m.sender_id === ME.id ? 'me' : 'them'} ${m.kind === 'image' ? 'has-img' : ''}`;
   if (m.id) el.dataset.id = m.id;
-  if (m.pending) el.dataset.tmp = m.client_id;
-  el.innerHTML = `${bodyHtml(m)}<span class="msg-meta"><time>${esc(fmtTime(m.created_at))}</time>${ticksHtml(m)}</span>`;
-  box.appendChild(el);
+  el.dataset.at = m.created_at;              // redrawDays() ใช้ตัวนี้หาว่าต้องคั่นวันตรงไหน
+  if (m.pending) {
+    el.dataset.tmp = m.client_id;
+    el.onclick = () => el.classList.contains('failed') && retry(m.client_id);
+  }
+  el.innerHTML = `${bodyHtml(m)}<span class="msg-meta"><time>${esc(fmtClock(m.created_at))}</time>${ticksHtml(m)}</span>`;
 
-  if (scroll && (atBottom || m.sender_id === ME.id)) box.scrollTop = box.scrollHeight;
+  if (top) box.prepend(el);
+  else box.appendChild(el);
+
+  // แทรกของเก่าไว้ข้างบนไม่ต้องเลื่อนตาม — loadOlder() จัดตำแหน่งสกรอลล์เองอยู่แล้ว
+  if (!top && scroll && (atBottom || m.sender_id === ME.id)) box.scrollTop = box.scrollHeight;
+}
+
+// เส้นคั่นวัน — เดินดูฟองทั้งกล่องแล้ววางเส้นใหม่ทั้งหมด
+// (คิดใหม่ทั้งกล่องเลย ไม่ต้องไล่แก้ทีละจุด — ฟองในกล่องมีหลักร้อย ถูกกว่าการเขียนให้ฉลาดแล้วพลาด)
+function redrawDays() {
+  const box = $('#chatMsgs');
+  if (!box) return;
+
+  $$('.chat-day', box).forEach((d) => d.remove());
+
+  let day = null;
+  $$('.msg', box).forEach((el) => {
+    const at = el.dataset.at;
+    if (!at) return;
+
+    const k = dayKey(at);
+    if (k === day) return;
+    day = k;
+
+    const sep = document.createElement('div');
+    sep.className = 'chat-day';
+    sep.textContent = fmtDay(at);
+    box.insertBefore(sep, el);
+  });
 }
 
 // ============================================================
@@ -276,6 +381,7 @@ const inCurChat = (m) =>
 function onIncoming(m) {
   if (inCurChat(m)) {
     addMessage(m);
+    redrawDays();                                          // ข้ามเที่ยงคืนระหว่างคุยกัน = ต้องมีเส้นคั่นวันใหม่
     if (m.sender_id === curChat.otherId) {
       hideTyping();                                        // ส่งข้อความมาแล้ว = เลิกพิมพ์แล้ว
       if (document.visibilityState === 'visible') markRead();
@@ -303,8 +409,13 @@ function onRead({ job_id, by, ids }) {
 
 function markRead() {
   if (!curChat || !socket) return;
-  socket.emit('chat:read', { jobId: curChat.jobId, otherId: curChat.otherId });
-  refreshBadges();
+
+  // รอ ack ก่อนค่อยดึงเลขแดงมาใหม่ — ยิง refreshBadges พร้อมกันเลยจะได้เลขเก่ากลับมา เพราะ UPDATE ยังไม่ลง
+  socket.timeout(SEND_TIMEOUT).emit(
+    'chat:read',
+    { jobId: curChat.jobId, otherId: curChat.otherId },
+    (err) => { if (!err) refreshBadges(); }
+  );
 }
 
 // ============================================================
@@ -367,41 +478,71 @@ function showPending(client_id, extra) {
     kind: 'text',
     ...extra,
   });
+  redrawDays();
+}
+
+// ส่งไม่สำเร็จ — คาฟองไว้ที่เดิมพร้อมเครื่องหมายตกใจ ให้แตะเพื่อยิงใหม่
+// (ดีกว่าลบฟองแล้วยัดข้อความคืนช่องพิมพ์: ถ้าผู้ใช้พิมพ์ประโยคถัดไปไปแล้ว ของเดิมจะหายไปเฉย ๆ)
+function markFailed(client_id, msg) {
+  const el = document.querySelector(`.msg[data-tmp="${CSS.escape(client_id)}"]`);
+  if (!el) return;
+
+  el.classList.add('failed');
+  el.title = msg;
+
+  const t = $('.ticks', el);
+  if (t) {
+    t.className = 'ticks failed';
+    t.title = msg;
+    t.innerHTML = ICONS.warn;
+  }
+}
+
+function retry(client_id) {
+  const el = document.querySelector(`.msg[data-tmp="${CSS.escape(client_id)}"]`);
+  const again = outbox.get(client_id);
+  if (!el || !again) return;
+
+  el.classList.remove('failed');
+  el.removeAttribute('title');
+
+  const t = $('.ticks', el);
+  if (t) {
+    t.className = 'ticks pending';
+    t.title = 'กำลังส่ง';
+    t.innerHTML = ICONS.clock;
+  }
+  again();
+}
+
+// ⚠️ ต้องใส่ .timeout() เสมอ — Socket.IO ไม่เรียก callback ให้เลยถ้าสายหลุดตอน ack ยังไม่กลับมา
+//    ไม่ใส่ = ฟองค้างเป็นรูปนาฬิกาตลอดกาล ผู้ใช้ไม่มีทางรู้ว่าส่งถึงหรือเปล่า (บั๊กเดิมของไฟล์นี้)
+function emitSend(chat, body, client_id) {
+  socket.timeout(SEND_TIMEOUT).emit(
+    'chat:send',
+    { jobId: chat.jobId, to: chat.otherId, body, client_id },
+    (err, r) => {
+      if (err) return markFailed(client_id, 'ส่งไม่สำเร็จ — แตะที่ข้อความเพื่อลองใหม่');
+      if (r?.error) return markFailed(client_id, r.error);
+      if (r?.message) addMessage(r.message);
+    }
+  );
 }
 
 function sendText() {
   const input = $('#chatText');
   const body = input.value.trim();
-  if (!body || !curChat) return;
+  if (!body || !curChat || !socket) return;
 
   input.value = '';
   sendTyping(false);
 
+  const chat = curChat;
   const client_id = newClientId();
   showPending(client_id, { body });
 
-  const chat = curChat;
-  const fail = (msg) => {
-    document.querySelector(`[data-tmp="${client_id}"]`)?.remove();
-    if (curChat === chat && !input.value) input.value = body;   // คืนข้อความให้ ไม่ต้องพิมพ์ใหม่
-    toast(msg);
-  };
-
-  // ปกติไปทาง socket — ถ้าท่อไม่ติด (เน็ตบางที่บล็อก WebSocket) ค่อยถอยไปใช้ REST
-  if (socket?.connected) {
-    socket.emit('chat:send', { jobId: chat.jobId, to: chat.otherId, body, client_id }, (r) => {
-      if (r?.error) return fail(r.error);
-      if (r?.message) addMessage(r.message);
-    });
-    return;
-  }
-
-  api(`/api/chat/${chat.jobId}`, {
-    method: 'POST',
-    body: JSON.stringify({ body, to: chat.otherId, client_id }),
-  })
-    .then((r) => r?.message && addMessage(r.message))
-    .catch((e) => fail(e.message));
+  outbox.set(client_id, () => emitSend(chat, body, client_id));
+  emitSend(chat, body, client_id);
 }
 
 // ============================================================
@@ -412,15 +553,25 @@ const MAX_SIDE = 1600;   // ด้านยาวสุดหลังย่อ 
 // ย่อรูปที่เครื่องคนส่งก่อนอัป — รูปจากมือถือใบละ 5-10 MB อัปตรงคือรอเป็นนาทีบนเน็ตบ้าน
 // ผลพลอยได้: canvas ทิ้ง EXIF ทั้งก้อน → พิกัด GPS ที่ฝังมากับรูปหลุดไปกับรูปไม่ได้
 async function shrinkImage(file) {
-  // GIF ย่อแล้วภาพเคลื่อนไหวหาย (canvas ได้เฟรมเดียว) → ส่งไฟล์เดิมไปเลย
-  if (file.type === 'image/gif' || typeof createImageBitmap !== 'function') return { blob: file };
+  if (typeof createImageBitmap !== 'function') return { blob: file };
 
   try {
     // imageOrientation: รูปจากมือถือฝังมุมหมุนไว้ใน EXIF — ไม่สั่งอันนี้รูปจะตะแคง
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
-    const w = Math.round(bmp.width * scale);
-    const h = Math.round(bmp.height * scale);
+    const ow = bmp.width;
+    const oh = bmp.height;
+
+    // GIF ย่อแล้วภาพเคลื่อนไหวหาย (canvas ได้เฟรมเดียว) → ส่งไฟล์เดิมไปเลย
+    // แต่ยังต้องแนบขนาดไปด้วยเสมอ ไม่งั้นฝั่งรับไม่มีที่จองไว้ให้รูป → หน้ากระตุกตอนรูปโหลดเสร็จ
+    // ซึ่งค้านกับเหตุผลทั้งหมดที่เก็บ image_w/h ไว้ตั้งแต่แรก
+    if (file.type === 'image/gif') {
+      bmp.close?.();
+      return { blob: file, w: ow, h: oh };
+    }
+
+    const scale = Math.min(1, MAX_SIDE / Math.max(ow, oh));
+    const w = Math.round(ow * scale);
+    const h = Math.round(oh * scale);
 
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -429,9 +580,9 @@ async function shrinkImage(file) {
     bmp.close?.();
 
     const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', 0.82));
-    return blob ? { blob, w, h } : { blob: file };
+    return blob ? { blob, w, h } : { blob: file, w: ow, h: oh };
   } catch {
-    return { blob: file };   // ย่อไม่ได้ก็ส่งของเดิม ให้ลิมิต 8 MB ฝั่ง server เป็นคนปัดตก
+    return { blob: file };   // อ่านรูปไม่ออกเลย ส่งของเดิม ให้ลิมิต 8 MB ฝั่ง server เป็นคนปัดตก
   }
 }
 
@@ -442,27 +593,30 @@ async function sendImage(file) {
   const chat = curChat;
   const client_id = newClientId();
   const localUrl = URL.createObjectURL(file);
+  blobUrls.set(client_id, localUrl);
 
   // โชว์รูปจากเครื่องตัวเองไปก่อนเลย ไม่ต้องรออัปเสร็จ
   showPending(client_id, { kind: 'image', local_url: localUrl });
 
-  try {
-    const { blob, w, h } = await shrinkImage(file);
+  const attempt = async () => {
+    try {
+      const { blob, w, h } = await shrinkImage(file);
 
-    const fd = new FormData();
-    fd.append('client_id', client_id);
-    if (w) { fd.append('w', w); fd.append('h', h); }
-    fd.append('image', blob, 'photo.jpg');
+      const fd = new FormData();
+      fd.append('client_id', client_id);
+      if (w && h) { fd.append('w', w); fd.append('h', h); }
+      fd.append('image', blob, 'photo.jpg');
 
-    // ต้องบอกคู่สนทนาทาง query — ด่านตรวจสิทธิ์ทำงานก่อน multer จะเขียนไฟล์ลงดิสก์ (ตอนนั้นยังอ่าน body ไม่ได้)
-    const r = await api(`/api/chat/${chat.jobId}/image?with=${chat.otherId}`, { method: 'POST', body: fd });
-    if (r?.message) addMessage(r.message);
-  } catch (e) {
-    document.querySelector(`[data-tmp="${client_id}"]`)?.remove();
-    toast(e.message || 'ส่งรูปไม่สำเร็จ');
-  } finally {
-    URL.revokeObjectURL(localUrl);
-  }
+      // ต้องบอกคู่สนทนาทาง query — ด่านตรวจสิทธิ์ทำงานก่อน multer จะเขียนไฟล์ลงดิสก์ (ตอนนั้นยังอ่าน body ไม่ได้)
+      const r = await api(`/api/chat/${chat.jobId}/image?with=${chat.otherId}`, { method: 'POST', body: fd });
+      if (r?.message) addMessage(r.message);   // ตรงนี้เป็นคนคืน object URL ให้เอง
+    } catch (e) {
+      markFailed(client_id, e.message || 'ส่งรูปไม่สำเร็จ — แตะที่รูปเพื่อลองใหม่');
+    }
+  };
+
+  outbox.set(client_id, attempt);
+  await attempt();
 }
 
 // หมายเหตุ: ระบบให้ดาว/รีวิว ถูกปิดไว้ชั่วคราว (ตกลงกัน 2026-07-14)

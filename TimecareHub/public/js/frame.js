@@ -45,10 +45,11 @@ const ICONS = {
   back: svg('<polyline points="15 18 9 12 15 6"/>', 2.2),
   send: svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>'),
   photo: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.8"/><polyline points="21 15 16 10 5 19"/>'),
-  // ติ๊กสถานะข้อความ: นาฬิกา = กำลังส่ง · ติ๊ก 1 = ส่งแล้ว · ติ๊ก 2 = อ่านแล้ว
+  // ติ๊กสถานะข้อความ: นาฬิกา = กำลังส่ง · ติ๊ก 1 = ส่งแล้ว · ติ๊ก 2 = อ่านแล้ว · ตกใจ = ส่งไม่สำเร็จ
   clock: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>', 2.2),
   tick: svg('<polyline points="4 12.5 9 17.5 20 6.5"/>', 2.6),
   ticks: svg('<polyline points="2 12.5 7 17.5 17.5 6.5"/><polyline points="10.5 15.5 12.5 17.5 23 6.5"/>', 2.6),
+  warn: svg('<circle cx="12" cy="12" r="9"/><line x1="12" y1="7.5" x2="12" y2="13"/><line x1="12" y1="16.4" x2="12" y2="16.5"/>', 2.2),
   empty: svg('<rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/>'),
   briefcase: svg('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
   browse: svg('<circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.3 2.7-5.4 6-5.4s6 2.1 6 5.4"/><circle cx="18" cy="9" r="2.4"/><path d="M17 14.8c2.4.3 4 2.2 4 5.2"/>'),
@@ -81,6 +82,29 @@ function toast(text, ms = 2800) {
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 const fmtBaht = (n) => Number(n).toLocaleString('th-TH');
 const fmtTime = (s) => new Date(s).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+// ในห้องแชทวันที่ไปอยู่บนเส้นคั่นแล้ว ใต้ฟองเลยเหลือแค่เวลาพอ (ทุกฟองมีวันที่ติดมาด้วยมันรก)
+const fmtClock = (s) => new Date(s).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+// เส้นคั่นวันในแชท — "วันนี้/เมื่อวาน" อ่านแล้วรู้เรื่องกว่าวันที่เต็ม
+const fmtDay = (s) => {
+  const d = new Date(s);
+  const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(d)) / 86400000);
+
+  if (days === 0) return 'วันนี้';
+  if (days === 1) return 'เมื่อวาน';
+  if (days < 7) return d.toLocaleDateString('th-TH', { weekday: 'long' });
+  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+// กุญแจเทียบว่า 2 ข้อความอยู่วันเดียวกันไหม — ต้องคิดตามเวลาท้องถิ่น ไม่ใช่ตัดสตริง ISO
+// (ISO เป็น UTC: ข้อความตี 3 ที่ไทย = สี่ทุ่ม UTC ของ "เมื่อวาน" → ตัดสตริงแล้วเส้นคั่นวันจะเพี้ยน)
+const dayKey = (s) => {
+  const d = new Date(s);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+
 const initial = (name) => String(name || '?').trim().charAt(0);
 const emptyBox = (text) => `<div class="empty">${ICONS.empty}<p>${text}</p></div>`;
 

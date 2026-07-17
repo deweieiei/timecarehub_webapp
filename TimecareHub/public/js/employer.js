@@ -1,7 +1,7 @@
 // ฝั่งผู้ว่าจ้าง — หาแคร์กิฟเวอร์ / โพสงาน / งานของฉัน / แชท
 
 let pickMap = null;
-let pickMarker = null;
+let pickArea = '';   // ชื่อย่านที่อ่านได้จากหมุด — ส่งขึ้นไปเป็น area_label ให้อัตโนมัติ
 
 const RATE_UNIT_TH = { per_hour: 'บาท/ชม.', per_day: 'บาท/วัน', per_month: 'บาท/เดือน' };
 
@@ -164,11 +164,16 @@ function openHireSheet(c) {
 //  โพสงานใหม่
 // ==========================================================
 function viewPost() {
-  pickMap = pickMarker = null;
+  pickMap = null;
+  pickArea = '';
+  // ถ้าเพิ่งออกจากหน้านี้ไปตอนยังอ่านชื่อย่านไม่เสร็จ ทิ้งรอบเก่าให้หมด
+  // ไม่งั้นมันจะกลับมาทับ pickArea ของหมุดใหม่
+  clearTimeout(revTimer);
+  revCtl?.abort();
 
   view.innerHTML = `
     <h2>โพสงานใหม่</h2>
-    <p class="sub">กรอกรายละเอียด แล้วแตะบนแผนที่เพื่อปักหมุดบ้าน</p>
+    <p class="sub">กรอกรายละเอียด แล้วเลื่อนแผนที่ให้หมุดตรงกับบ้าน</p>
 
     <form id="jobForm">
       <div class="card">
@@ -218,22 +223,26 @@ function viewPost() {
       </div>
 
       <div class="card">
-        <div class="field">
-          <label>ที่อยู่เต็ม</label>
-          <input name="address" placeholder="123/45 ซอยลาดพร้าว 15 จตุจักร">
-          <p class="hint">🔒 เห็นเฉพาะแคร์กิฟเวอร์ที่ยืนยันตัวตนแล้ว</p>
-        </div>
         <div class="field" style="margin:0">
-          <label>ชื่อย่าน</label>
-          <input name="area_label" placeholder="ลาดพร้าว">
-          <p class="hint">👁 คนทั่วไปเห็นได้</p>
+          <label>ที่อยู่เต็ม</label>
+          <div class="row" style="align-items:center">
+            <input name="address" id="addrInput" placeholder="123/45 ซอยลาดพร้าว 15 จตุจักร">
+            <button type="button" id="addrFind" class="btn btn-sm btn-ghost" style="flex:0 0 auto">ค้นหาในแผนที่</button>
+          </div>
+          <p class="hint">🔒 เห็นเฉพาะแคร์กิฟเวอร์ที่ยืนยันตัวตนแล้ว · กดค้นหาแล้วแผนที่จะเลื่อนไปให้</p>
         </div>
       </div>
 
       <div class="card">
         <label>ปักหมุดตำแหน่ง *</label>
-        <p id="pickInfo" class="hint" style="color:var(--red);margin-bottom:10px">ยังไม่ได้ปักหมุด — แตะบนแผนที่</p>
-        <div id="pickMap"></div>
+        <p id="pickInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงกับบ้าน</p>
+        <div class="pick-wrap">
+          <div id="pickMap"></div>
+          <div class="pick-pin" id="pickPin" aria-hidden="true"></div>
+          <button type="button" id="btnMyLoc" class="pick-locate" title="ใช้ตำแหน่งของฉัน">
+            <span>◎</span> ตำแหน่งของฉัน
+          </button>
+        </div>
       </div>
 
       <button class="btn btn-block">โพสงาน</button>
@@ -241,29 +250,121 @@ function viewPost() {
 
   pickMap = L.map('pickMap').setView(BKK, 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(pickMap);
-  navigator.geolocation?.getCurrentPosition((p) => pickMap.setView([p.coords.latitude, p.coords.longitude], 15));
 
-  pickMap.on('click', (e) => {
-    if (pickMarker) pickMarker.setLatLng(e.latlng);
-    else pickMarker = L.marker(e.latlng).addTo(pickMap);
-    const info = $('#pickInfo');
-    info.textContent = `✓ ปักหมุดแล้ว (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)})`;
-    info.style.color = 'var(--green)';
+  // ขยับไปที่ตำแหน่งเครื่องให้ตอนเปิดหน้า — แต่ถ้าผู้ใช้เริ่มเลื่อนแผนที่เองแล้ว อย่าไปแย่งจอเขา
+  let touched = false;
+  pickMap.once('dragstart zoomstart', () => { touched = true; });
+  navigator.geolocation?.getCurrentPosition((p) => {
+    if (!touched) pickMap.setView([p.coords.latitude, p.coords.longitude], 16);
   });
+
+  const pin = $('#pickPin');
+  pickMap.on('movestart', () => pin.classList.add('lift'));
+  pickMap.on('moveend', () => { pin.classList.remove('lift'); onPinMoved(); });
+  onPinMoved();
+
+  $('#btnMyLoc').onclick = locateMe;
+  $('#addrFind').onclick = findAddress;
+  // ในฟอร์ม ปุ่ม Enter จะไปกดส่งฟอร์ม — ดักไว้ให้กลายเป็นค้นหาที่อยู่แทน
+  $('#addrInput').onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    findAddress();
+  };
 
   $('#jobForm').onsubmit = async (e) => {
     e.preventDefault();
-    if (!pickMarker) return toast('แตะบนแผนที่เพื่อปักหมุดตำแหน่งก่อน');
     const data = Object.fromEntries(new FormData(e.target));
-    const { lat, lng } = pickMarker.getLatLng();
-    data.lat = lat;
-    data.lng = lng;
+    const c = pickMap.getCenter();
+    data.lat = c.lat;
+    data.lng = c.lng;
+    data.area_label = pickArea || null;   // ไม่ต้องให้ผู้ใช้พิมพ์ — อ่านจากหมุดให้เลย
     try {
       await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
       toast('โพสงานแล้ว รอแคร์กิฟเวอร์กดขอรับงาน');
       go('myjobs', EMPLOYER_VIEWS);
     } catch (err) { toast(err.message); }
   };
+}
+
+// ---------- หมุดกลางจอ: อ่านพิกัด + ชื่อย่าน จากจุดกึ่งกลางแผนที่ ----------
+const NOMINATIM = 'https://nominatim.openstreetmap.org';
+let revTimer = null;
+let revCtl = null;
+
+function onPinMoved() {
+  const c = pickMap.getCenter();
+  setPickInfo(`📍 ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)} — กำลังอ่านชื่อย่าน…`);
+
+  // เลื่อนแผนที่ทีเดียวยิงหลายรอบได้ — หน่วงไว้ แล้วยกเลิกรอบเก่าทิ้ง
+  // (Nominatim ขอไม่เกิน 1 ครั้ง/วินาที)
+  clearTimeout(revTimer);
+  revCtl?.abort();
+  revTimer = setTimeout(async () => {
+    revCtl = new AbortController();
+    try {
+      const r = await fetch(
+        `${NOMINATIM}/reverse?format=jsonv2&zoom=16&accept-language=th&lat=${c.lat}&lon=${c.lng}`,
+        { signal: revCtl.signal }
+      );
+      const a = (await r.json()).address || {};
+      pickArea = a.suburb || a.neighbourhood || a.city_district || a.town || a.village || a.city || a.county || '';
+    } catch (err) {
+      if (err.name === 'AbortError') return;   // มีรอบใหม่มาแทนแล้ว ไม่ต้องเขียนทับ
+      pickArea = '';
+    }
+    setPickInfo(`📍 ${pickArea || 'ตำแหน่งนี้'} · ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`);
+  }, 600);
+}
+
+function setPickInfo(text) {
+  const el = $('#pickInfo');
+  if (el) el.textContent = text;
+}
+
+// ---------- ปุ่ม "ตำแหน่งของฉัน" ----------
+function locateMe() {
+  const btn = $('#btnMyLoc');
+  if (!navigator.geolocation) return toast('เครื่องนี้หาตำแหน่งอัตโนมัติไม่ได้ — เลื่อนแผนที่เอาเองได้เลย', 4200);
+
+  btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (p) => {
+      btn.disabled = false;
+      pickMap.setView([p.coords.latitude, p.coords.longitude], 17);
+    },
+    (err) => {
+      btn.disabled = false;
+      toast(err.code === err.PERMISSION_DENIED
+        ? 'ยังไม่ได้อนุญาตให้เข้าถึงตำแหน่ง — เปิดสิทธิ์ในเบราว์เซอร์ก่อน'
+        : 'หาตำแหน่งไม่สำเร็จ ลองใหม่อีกครั้ง', 4200);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+}
+
+// ---------- ปุ่ม "ค้นหาในแผนที่" — พิมพ์ที่อยู่แล้วให้แผนที่เลื่อนไปให้ ----------
+async function findAddress() {
+  const q = $('#addrInput').value.trim();
+  if (!q) return toast('พิมพ์ที่อยู่ก่อน แล้วค่อยกดค้นหา');
+
+  const btn = $('#addrFind');
+  btn.disabled = true;
+  btn.textContent = 'กำลังค้นหา…';
+  try {
+    const r = await fetch(
+      `${NOMINATIM}/search?format=jsonv2&limit=1&countrycodes=th&accept-language=th&q=${encodeURIComponent(q)}`
+    );
+    const hits = await r.json();
+    if (!hits.length) return toast('ไม่พบที่อยู่นี้ — ลองพิมพ์สั้นลง เช่น ชื่อซอย/ถนน หรือเลื่อนแผนที่เอง', 4600);
+    pickMap.setView([Number(hits[0].lat), Number(hits[0].lon)], 17);
+    toast('เลื่อนแผนที่ให้แล้ว — ปรับหมุดให้ตรงบ้านอีกที');
+  } catch {
+    toast('ค้นหาไม่สำเร็จ ลองใหม่อีกครั้ง');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ค้นหาในแผนที่';
+  }
 }
 
 // ==========================================================

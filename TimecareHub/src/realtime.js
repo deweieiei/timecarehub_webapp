@@ -6,6 +6,10 @@
 //  หน้าเว็บค่อยกรองเองว่าตรงกับห้องที่เปิดอยู่ไหม
 //    → เปิดกี่แท็บก็ตรงกันหมด และรายการห้องแชทเด้งสดโดยไม่ต้องเปิดห้องนั้นค้างไว้
 //
+//  ข้อความทั้งหมดวิ่งผ่านท่อนี้ทางเดียว ไม่มีทางถอย REST แล้ว
+//  (เน็ตที่บล็อก WebSocket socket.io ถอยไปใช้ HTTP long-polling ให้เองอยู่แล้ว
+//   ไม่ต้องมีเส้นสำรองซ้ำซ้อน — มี 2 เส้นแปลว่าต้องกันยิงรัว 2 ที่ แล้ววันหนึ่งจะลืมที่นึง)
+//
 //  ⚠️ ทะเบียน "ใครออนไลน์" เก็บใน RAM ของโปรเซสนี้
 //     ใช้ได้เพราะ pm2 รัน timecarehub-8091 โปรเซสเดียว (fork mode)
 //     ถ้าวันไหนแตกเป็น cluster หลายโปรเซส ต้องย้ายไปเก็บที่ Redis ไม่งั้นจะเห็นออนไลน์ไม่ครบ
@@ -14,9 +18,26 @@ const { Server } = require('socket.io');
 const db = require('./db');
 const { userIdFromCookieHeader } = require('./auth');
 const { checkAccess, contactsOf, insertMessage, markRead } = require('./chat-core');
+const { allow } = require('./rate-limit');
 
 // userId → จำนวน socket ที่ต่ออยู่ (คนเดียวเปิดได้หลายแท็บ/หลายเครื่อง)
+// ระหว่างช่วงผ่อนผันข้างล่าง คีย์จะยังอยู่โดยมีค่าเป็น 0 = "ยังนับว่าออนไลน์ แต่ไม่เหลือแท็บแล้ว"
 const online = new Map();
+
+// userId → timer นับถอยหลังก่อนประกาศว่าออฟไลน์
+const offlineTimers = new Map();
+
+// มือถือสลับ WiFi↔4G, เข้าลิฟต์, หรือหน้าจอดับแป๊บนึง = socket หลุดแล้วต่อกลับเองใน 2-3 วิ
+// ถ้าประกาศ "ออฟไลน์" ทันทีที่หลุด จุดเขียวฝั่งเพื่อนจะกระพริบรัว ๆ
+// และ contactsOf() (query UNION ก้อนใหญ่) จะถูกยิงซ้ำทุกครั้งที่กระพริบ
+// → รอให้แน่ใจก่อนค่อยประกาศ ต่อกลับมาทันในช่วงนี้ = เพื่อนไม่รู้เรื่องเลย
+const OFFLINE_GRACE_MS = 8000;
+
+// สิทธิ์ในห้องแชทแทบไม่เปลี่ยนระหว่างที่นั่งคุยกันอยู่ แต่ checkAccess() ยิง 1-2 query ทุกครั้งที่ถูกเรียก
+// ลำพัง "กำลังพิมพ์" อย่างเดียวก็ยิงทุก 2 วิต่อคนที่กำลังพิมพ์แล้ว → จำคำตอบไว้สั้น ๆ ต่อ socket
+// 30 วิ = ถ้าถูกถอนสิทธิ์กลางคัน อย่างช้าที่สุดอีก 30 วิก็คุยต่อไม่ได้แล้ว รับได้
+// (ไม่แคชข้ามคน: Map อยู่ใน socket.data ตายไปพร้อม socket — ไม่มีทางหยิบของคนอื่นมาใช้ผิด)
+const ACCESS_TTL_MS = 30000;
 
 let io = null;
 
@@ -52,6 +73,23 @@ function toBoth(a, b, event, payload) {
   io.to([room(a), room(b)]).emit(event, payload);
 }
 
+// เช็คสิทธิ์แบบมีแคช — ตัวจริงอยู่ที่ chat-core.js ที่เดียวเหมือนเดิม ตรงนี้แค่จำคำตอบไว้
+function accessFor(socket, jobId, wanted) {
+  const key = `${jobId}:${wanted ?? ''}`;
+  const hit = socket.data.access.get(key);
+  if (hit && hit.exp > Date.now()) return hit.val;
+
+  // เก็บเป็น promise ไม่ใช่ค่าที่ resolve แล้ว — พิมพ์รัว ๆ ยิงพร้อมกัน 3 event
+  // จะได้ query รอบเดียว ไม่ใช่ 3 รอบพร้อมกันเพราะยังไม่มีใครเขียนแคชลงไป
+  const val = checkAccess(jobId, socket.data.userId, wanted).catch((e) => {
+    // DB สะดุดชั่วคราว — ทิ้งแคชทันที ไม่งั้นจำความล้มเหลวไว้ยาว 30 วิ แล้วพังซ้ำทุก event
+    socket.data.access.delete(key);
+    throw e;
+  });
+  socket.data.access.set(key, { val, exp: Date.now() + ACCESS_TTL_MS });
+  return val;
+}
+
 function init(server) {
   io = new Server(server, {
     // ต่อไม่ติดแบบ WebSocket (เน็ตบางที่บล็อก) socket.io จะถอยไปใช้ HTTP long-polling ให้เอง
@@ -70,10 +108,19 @@ function init(server) {
 
   io.on('connection', (socket) => {
     const me = socket.data.userId;
+    socket.data.access = new Map();
 
     socket.join(room(me));
 
-    // socket แรกของคนนี้ = เพิ่งออนไลน์ → ค่อยประกาศ (เปิดแท็บที่ 2 ไม่ต้องประกาศซ้ำ)
+    // เพิ่งหลุดไปแล้วต่อกลับมาทันช่วงผ่อนผัน → ยกเลิกคิวประกาศออฟไลน์ทิ้ง
+    // เพื่อนยังไม่เคยรู้ว่าเราหลุด ก็ไม่ต้องประกาศว่าเรากลับมา (online ยังมีคีย์เราอยู่ → wasOffline = false)
+    const grace = offlineTimers.get(me);
+    if (grace) {
+      clearTimeout(grace);
+      offlineTimers.delete(me);
+    }
+
+    // socket แรกของคนนี้ = เพิ่งออนไลน์จริง ๆ → ค่อยประกาศ (เปิดแท็บที่ 2 ไม่ต้องประกาศซ้ำ)
     const wasOffline = !online.has(me);
     online.set(me, (online.get(me) || 0) + 1);
     if (wasOffline) broadcastPresence(me, true);
@@ -82,18 +129,26 @@ function init(server) {
     socket.on('chat:send', async (payload = {}, cb) => {
       const ack = typeof cb === 'function' ? cb : () => {};
       try {
+        // กันยิงรัวก่อนอย่างอื่นเสมอ — ด่านนี้ต้องถูกที่สุด ห้ามแตะ DB ก่อนผ่านตรงนี้
+        if (!allow('send', me)) return ack({ error: 'ส่งข้อความถี่เกินไป พักสักครู่แล้วลองใหม่' });
+
         const jobId = Number(payload.jobId);
         const body = String(payload.body || '').trim();
         if (!jobId) return ack({ error: 'ไม่รู้ว่าจะส่งเข้างานไหน' });
         if (!body) return ack({ error: 'พิมพ์ข้อความก่อนส่ง' });
         if (body.length > 4000) return ack({ error: 'ข้อความยาวเกินไป' });
 
-        const access = await checkAccess(jobId, me, payload.to);
+        const access = await accessFor(socket, jobId, payload.to);
         if (access.error) return ack({ error: access.error });
 
-        const msg = await insertMessage({ jobId, from: me, to: access.otherId, kind: 'text', body });
+        // client_id = เลขอ้างอิงที่หน้าเว็บสร้างเอง ใช้ 2 อย่าง:
+        //   1. ส่งกลับไปให้มันจับคู่กับฟองข้อความที่โชว์ล่วงหน้า
+        //   2. กันบันทึกซ้ำตอนผู้ใช้กดส่งใหม่เพราะ ack รอบก่อนหายไป (ดู db/005)
+        const { duplicate, ...msg } = await insertMessage({
+          jobId, from: me, to: access.otherId, kind: 'text', body,
+          clientId: payload.client_id,
+        });
 
-        // client_id = เลขอ้างอิงที่หน้าเว็บสร้างเอง — ส่งกลับไปให้มันจับคู่กับฟองข้อความที่โชว์ล่วงหน้า
         const row = { ...msg, client_id: payload.client_id || null };
         toBoth(me, access.otherId, 'chat:new', row);
         ack({ ok: true, message: row });
@@ -105,12 +160,14 @@ function init(server) {
 
     // ---------- กำลังพิมพ์ ----------
     // ไม่ได้ "บันทึก" สถานะไว้ที่ไหน แค่เคาะบอกอีกฝั่ง — หลุดหายก็ไม่มีใครเดือดร้อน
-    // แต่ยังต้องเช็คสิทธิ์ทุกครั้ง ไม่งั้นใครก็ยิงกวนคนอื่นได้ (หน้าเว็บหรี่ให้เหลือ 1 ครั้ง/2 วิ อยู่แล้ว)
+    // แต่ยังต้องเช็คสิทธิ์ทุกครั้ง ไม่งั้นใครก็ยิงกวนคนอื่นได้ (ตอนนี้เช็คจากแคช แทบไม่แตะ DB แล้ว)
     socket.on('chat:typing', async (payload = {}) => {
       try {
+        if (!allow('typing', me)) return;
+
         const jobId = Number(payload.jobId);
         if (!jobId) return;
-        const access = await checkAccess(jobId, me, payload.to);
+        const access = await accessFor(socket, jobId, payload.to);
         if (access.error) return;
 
         io.to(room(access.otherId)).emit('chat:typing', {
@@ -122,15 +179,20 @@ function init(server) {
     });
 
     // ---------- อ่านแล้ว ----------
-    socket.on('chat:read', async (payload = {}) => {
+    // ต้อง ack กลับทุกทางออก: หน้าเว็บรอ ack ตัวนี้ก่อนค่อยดึงเลขแดงมาใหม่
+    // (ยิง refreshBadges พร้อมกันเลยจะได้เลขเก่ากลับมา เพราะ UPDATE ยังไม่ลง)
+    socket.on('chat:read', async (payload = {}, cb) => {
+      const ack = typeof cb === 'function' ? cb : () => {};
       try {
+        if (!allow('read', me)) return ack({ ok: false });
+
         const jobId = Number(payload.jobId);
-        if (!jobId) return;
-        const access = await checkAccess(jobId, me, payload.otherId);
-        if (access.error) return;
+        if (!jobId) return ack({ ok: false });
+        const access = await accessFor(socket, jobId, payload.otherId);
+        if (access.error) return ack({ ok: false });
 
         const ids = await markRead(jobId, me, access.otherId);
-        if (!ids.length) return;   // อ่านไปหมดแล้ว ไม่ต้องกวนใคร
+        if (!ids.length) return ack({ ok: true });   // อ่านไปหมดแล้ว ไม่ต้องกวนใคร
 
         toBoth(me, access.otherId, 'chat:read', {
           job_id: jobId,
@@ -138,18 +200,27 @@ function init(server) {
           ids,
           at: new Date().toISOString(),
         });
+        ack({ ok: true });
       } catch (e) {
         console.error('chat:read ล้ม:', e.message);
+        ack({ ok: false });
       }
     });
 
     socket.on('disconnect', () => {
       const left = (online.get(me) || 1) - 1;
-      if (left > 0) return online.set(me, left);   // ยังเหลือแท็บอื่นเปิดอยู่ = ยังออนไลน์
+      online.set(me, left);
+      if (left > 0) return;   // ยังเหลือแท็บอื่นเปิดอยู่ = ยังออนไลน์
 
-      online.delete(me);
-      touchLastSeen(me);
-      broadcastPresence(me, false);
+      // ไม่มีแท็บเหลือแล้ว แต่ยังไม่ประกาศทันที — คงสถานะออนไลน์ไว้ก่อน เผื่อเน็ตแค่สะดุด
+      offlineTimers.set(me, setTimeout(() => {
+        offlineTimers.delete(me);
+        if ((online.get(me) || 0) > 0) return;   // ต่อกลับมาแล้ว ไม่ต้องทำอะไร
+
+        online.delete(me);
+        touchLastSeen(me);
+        broadcastPresence(me, false);
+      }, OFFLINE_GRACE_MS));
     });
   });
 
