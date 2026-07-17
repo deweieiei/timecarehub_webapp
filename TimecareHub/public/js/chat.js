@@ -94,7 +94,8 @@ const previewOf = (t) =>
   t.last_kind === 'image' ? '📷 รูปภาพ' : (t.last_message || 'ยังไม่มีข้อความ');
 
 async function viewChat() {
-  const { items } = await api('/api/chat/threads');
+  // กรองตามบทบาทหน้าปัจจุบัน — แคร์กิฟเวอร์เห็นแต่ห้องผู้ว่าจ้าง / ผู้ว่าจ้างเห็นแต่ห้องแคร์กิฟเวอร์
+  const { items } = await api(`/api/chat/threads?role=${ME.active_role}`);
   items.forEach((t) => setPresence(t.other_id, t.other_online, t.other_last_seen));
 
   view.innerHTML = `
@@ -147,7 +148,7 @@ function closeChat() {
 async function openChat(jobId, otherId, name, title) {
   // เปิดจากหน้า "ผู้สมัคร" จะไม่มีชื่อส่งมา — ไปหยิบจากรายการห้องแชทแทน
   if (!name) {
-    const { items } = await api('/api/chat/threads');
+    const { items } = await api(`/api/chat/threads?role=${ME.active_role}`);
     const t = items.find((x) => String(x.job_id) === String(jobId) && String(x.other_id) === String(otherId));
     name = t?.other_name || 'แชท';
     title = t?.title || '';

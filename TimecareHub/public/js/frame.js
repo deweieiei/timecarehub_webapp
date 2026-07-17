@@ -392,7 +392,7 @@ function setMyPhoto(url) {
 // ---------- ตัวเลขแดง ๆ บนแท็บ ----------
 async function refreshBadges() {
   try {
-    const n = await api('/api/notifications');
+    const n = await api(`/api/notifications?role=${ME.active_role}`);
 
     // แท็บไหนควรมีเลขอะไร — ขึ้นกับบทบาทที่เปิดอยู่
     const counts = {

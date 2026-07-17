@@ -77,6 +77,19 @@ const upload = multer({
 router.get('/threads', requireAuth, async (req, res) => {
   const me = req.user.id;
 
+  // กรองห้องแชทตามบทบาทที่กำลังใช้งาน (ส่งมาทาง ?role=)
+  //   employer  → เห็นเฉพาะห้องที่ฉันเป็น "ผู้ว่าจ้าง" (คู่สนทนาเป็นแคร์กิฟเวอร์)
+  //   caregiver → เห็นเฉพาะห้องที่ฉันเป็น "แคร์กิฟเวอร์" (คู่สนทนาเป็นผู้ว่าจ้าง)
+  //   ไม่ส่ง/ค่าอื่น → เห็นทั้งหมด (พฤติกรรมเดิม)
+  const role = ['employer', 'caregiver'].includes(req.query.role) ? req.query.role : null;
+
+  const openWhere = role === 'employer' ? 'j.employer_id = ?'
+    : role === 'caregiver' ? 'a.caregiver_id = ?'
+    : '(j.employer_id = ? OR a.caregiver_id = ?)';
+  const directWhere = role === 'employer' ? 'j.employer_id = ?'
+    : role === 'caregiver' ? 'j.target_caregiver_id = ?'
+    : '(j.employer_id = ? OR j.target_caregiver_id = ?)';
+
   const [rows] = await db.query(
     `SELECT t.job_id, t.title, t.status, t.hire_type,
             u.id AS other_id, u.full_name AS other_name, u.last_seen_at AS other_last_seen,
@@ -91,7 +104,7 @@ router.get('/threads', requireAuth, async (req, res) => {
                 IF(j.employer_id = ?, a.caregiver_id, j.employer_id) AS other_id
            FROM jobs j
            JOIN job_applications a ON a.job_id = j.id
-          WHERE j.hire_type = 'open' AND (j.employer_id = ? OR a.caregiver_id = ?)
+          WHERE j.hire_type = 'open' AND ${openWhere}
 
          UNION
 
@@ -99,7 +112,7 @@ router.get('/threads', requireAuth, async (req, res) => {
          SELECT j.id, j.title, j.status, j.hire_type,
                 IF(j.employer_id = ?, j.target_caregiver_id, j.employer_id)
            FROM jobs j
-          WHERE j.hire_type = 'direct' AND (j.employer_id = ? OR j.target_caregiver_id = ?)
+          WHERE j.hire_type = 'direct' AND ${directWhere}
        ) t
        JOIN users u ON u.id = t.other_id
        -- ข้อความล่าสุดของคู่นี้ (โชว์ใต้ชื่อในรายการห้อง)
@@ -111,7 +124,8 @@ router.get('/threads', requireAuth, async (req, res) => {
        )
       WHERE t.other_id <> ?
       ORDER BY last_at IS NULL, last_at DESC`,
-    [me, me, me, me, me, me, me, me, me, me]
+    // ทุก ? ผูกกับ me ทั้งหมด — พอกรอง role แล้ว openWhere/directWhere เหลือ ? อย่างละ 1 (จากเดิม 2)
+    Array(role ? 8 : 10).fill(me)
   );
 
   // สถานะออนไลน์ไม่ได้อยู่ใน DB — ของจริงอยู่ในทะเบียน socket (ดู src/realtime.js)
