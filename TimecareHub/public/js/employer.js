@@ -236,10 +236,10 @@ function viewPost() {
       <div class="card">
         <label>ปักหมุดตำแหน่ง *</label>
         <p id="pickInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงกับบ้าน</p>
-        <div class="pick-wrap">
+        <div class="map-wrap pick-wrap">
           <div id="pickMap"></div>
           <div class="pick-pin" id="pickPin" aria-hidden="true"></div>
-          <button type="button" id="btnMyLoc" class="pick-locate" title="ใช้ตำแหน่งของฉัน">
+          <button type="button" id="btnMyLoc" class="map-locate" title="ใช้ตำแหน่งของฉัน">
             <span>◎</span> ตำแหน่งของฉัน
           </button>
         </div>

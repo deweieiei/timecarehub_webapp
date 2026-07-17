@@ -346,9 +346,11 @@ input[type=file] { padding: 10px; font-size: 14px; }
 .leaflet-container { font-family: 'Sarabun', sans-serif; }
 .leaflet-control-attribution { font-size: 9px; }
 
+/* กรอบแผนที่ที่มีปุ่ม/หมุดลอยทับ */
+.map-wrap { position: relative; }
+
 /* หมุดปักกลางจอ — ผู้ใช้เลื่อน/ซูมแผนที่ใต้หมุด แทนการแตะปัก
    ตัวหมุดต้องรับคลิกไม่ได้ (pointer-events:none) ไม่งั้นจะบังการลากแผนที่ */
-.pick-wrap { position: relative; }
 .pick-pin {
   position: absolute; left: 50%; top: 50%;
   width: 30px; height: 30px; margin-left: -15px; margin-top: -30px;   /* ปลายหมุดชี้จุดกึ่งกลางพอดี */
@@ -382,8 +384,26 @@ input[type=file] { padding: 10px; font-size: 14px; }
   pointer-events: none; z-index: 499;
 }
 
+/* หมุดที่ผู้ใช้ปักเอง (หน้าหางาน) — ลากได้ สีส้มให้ต่างจากหมุดงานสีเทียล */
+.drop-pin { background: none !important; border: 0 !important; }
+.drop-pin-body { width: 30px; height: 30px; position: relative; cursor: grab; }
+.drop-pin-body::before {
+  content: ''; position: absolute; inset: 0;
+  background: var(--amber-dark);
+  border: 3px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+}
+.drop-pin-body::after {
+  content: ''; position: absolute;
+  left: 50%; top: 11px; width: 7px; height: 7px; margin-left: -3.5px;
+  background: #fff; border-radius: 50%;
+}
+.leaflet-dragging .drop-pin-body { cursor: grabbing; }
+
 /* ปุ่มตำแหน่งของฉัน — ลอยมุมขวาล่างของแผนที่ */
-.pick-locate {
+.map-locate {
   position: absolute; right: 10px; bottom: 22px;
   z-index: 500;
   display: flex; align-items: center; gap: 5px;
@@ -394,13 +414,30 @@ input[type=file] { padding: 10px; font-size: 14px; }
   box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
   cursor: pointer;
 }
-.pick-locate:hover { background: var(--teal-light); }
-.pick-locate:active { transform: scale(.96); }
-.pick-locate:disabled { opacity: .5; cursor: wait; }
-.pick-locate span { font-size: 15px; line-height: 1; }
+.map-locate:hover { background: var(--teal-light); }
+.map-locate:active { transform: scale(.96); }
+.map-locate:disabled { opacity: .5; cursor: wait; }
+.map-locate span { font-size: 15px; line-height: 1; }
+
+/* ปุ่มสลับโหมดหางาน — ปักหมุด / ดูงานทั้งหมด */
+.seg {
+  display: flex; gap: 6px;
+  background: #fff; border: 1.5px solid var(--line); border-radius: 999px;
+  padding: 5px; margin-bottom: 14px;
+}
+.seg button {
+  flex: 1; min-width: 0;
+  padding: 9px 10px;
+  font-family: inherit; font-size: 13.5px; font-weight: 600;
+  color: var(--muted); background: none; border: 0; border-radius: 999px;
+  cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.seg button:hover { color: var(--teal); }
+.seg button.on { background: var(--teal); color: #fff; }
 
 /* ============================================================
-   หมุดบนแผนที่ — โชว์ราคา กดได้
+   หมุดบนแผนที่ — โชว์หัวข้องาน กดได้
    ============================================================ */
 .pin {
   background: none !important;
@@ -417,6 +454,8 @@ input[type=file] { padding: 10px; font-size: 14px; }
   font-family: 'Sarabun', sans-serif; font-size: 13px; font-weight: 700;
   white-space: nowrap; box-shadow: 0 3px 10px rgba(0, 0, 0, .3);
   border: 2px solid #fff;
+  /* หัวข้องานยาวแค่ไหนก็ได้ — ตัดด้วย … ไม่งั้นหมุดเดียวกินทั้งจอ */
+  max-width: 170px; overflow: hidden; text-overflow: ellipsis;
 }
 .pin-tip {
   width: 0; height: 0; margin-top: -2px;

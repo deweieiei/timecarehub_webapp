@@ -1,17 +1,27 @@
 // ฝั่งแคร์กิฟเวอร์ — หางาน / งานที่ขอรับไว้ / แชท / ยืนยันตัวตน
 
 let map = null;
+let jobsLayer = null;    // เลเยอร์หมุดงาน — ล้างทีเดียวได้ ไม่ไปโดนหมุดที่ผู้ใช้ปัก
+let dropPin = null;      // หมุดที่ผู้ใช้ปักไว้เอง
+let radiusRing = null;   // วงรัศมีรอบหมุด
+let pinLatLng = null;    // จุดที่หมุดปักอยู่
+let pinTouched = false;  // ผู้ใช้ขยับหมุดเองแล้วหรือยัง
+let findMode = 'pin';    // 'pin' = ปักหมุดหาในรัศมี | 'all' = ดูงานทั้งหมด ไม่สนตำแหน่ง
 
 // ==========================================================
-//  หางานบนแผนที่
+//  หางานบนแผนที่ — 2 แบบ
+//    1) ปักหมุดตรงไหนก็ได้ แล้วหางานในรัศมีรอบหมุด
+//    2) ดูงานทั้งหมด — ปิดหมุด/ตำแหน่งไปเลย
 // ==========================================================
 async function viewFind() {
-  map = null;
+  map = jobsLayer = dropPin = radiusRing = pinLatLng = null;
+  pinTouched = false;
+  findMode = 'pin';
   const approved = ME.kyc_status === 'approved';
 
   view.innerHTML = `
     <h2>หางานใกล้ฉัน</h2>
-    <p class="sub">เลื่อนแผนที่ไปย่านที่อยากทำงาน แล้วกดค้นหา</p>
+    <p class="sub">ปักหมุดตรงย่านที่อยากทำงาน แล้วเลือกรัศมี — หรือกดดูงานทั้งหมดก็ได้</p>
 
     ${approved ? '' : `
       <div class="alert alert-warn">
@@ -20,16 +30,28 @@ async function viewFind() {
         <button class="btn btn-sm btn-amber" style="margin-top:10px" id="goKyc">ยืนยันตัวตนเลย</button>
       </div>`}
 
-    <div class="card">
+    <div class="seg">
+      <button type="button" data-mode="pin" class="on">📍 ปักหมุดหาในรัศมี</button>
+      <button type="button" data-mode="all">🗺️ ดูงานทั้งหมด</button>
+    </div>
+
+    <div class="map-wrap">
+      <div id="map"></div>
+      <button type="button" id="btnMyLoc" class="map-locate" title="ใช้ตำแหน่งของฉัน">
+        <span>◎</span> ตำแหน่งของฉัน
+      </button>
+    </div>
+
+    <div class="card" id="radiusBar" style="margin-top:12px">
+      <p class="hint" id="pinHint" style="margin:0 0 10px">แตะบนแผนที่เพื่อย้ายหมุด หรือลากหมุดได้เลย</p>
       <div class="row" style="align-items:flex-end">
         <div class="field" style="margin:0">
-          <label>รัศมี</label>
+          <label>รัศมีรอบหมุด</label>
           <select id="radius">
             <option value="5">5 กม.</option>
             <option value="10">10 กม.</option>
             <option value="20" selected>20 กม.</option>
             <option value="50">50 กม.</option>
-            <option value="all">ทั้งหมด (ไม่จำกัดระยะ)</option>
           </select>
         </div>
         <div class="field" style="margin:0;flex:1.3">
@@ -38,93 +60,179 @@ async function viewFind() {
       </div>
     </div>
 
-    <div id="map"></div>
     <div id="results" style="margin-top:16px"></div>`;
 
   $('#goKyc')?.addEventListener('click', () => go('kyc', CAREGIVER_VIEWS));
 
   map = L.map('map').setView(BKK, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+  jobsLayer = L.layerGroup().addTo(map);
 
-  navigator.geolocation?.getCurrentPosition(
-    (p) => { map.setView([p.coords.latitude, p.coords.longitude], 13); search(); },
-    () => search()
+  map.on('click', (e) => {
+    if (findMode !== 'pin') return;
+    pinTouched = true;
+    movePin(e.latlng);
+  });
+
+  $$('[data-mode]', view).forEach((b) => (b.onclick = () => setFindMode(b.dataset.mode)));
+  $('#btnMyLoc').onclick = locateMe;
+  $('#radius').onchange = () => { drawRing(); runSearch({ fit: true }); };
+  $('#search').onclick = () => runSearch({ fit: true });
+
+  // ปักหมุดกลางแผนที่ไว้ก่อน จะได้มีงานให้ดูทันทีโดยไม่ต้องรอ GPS
+  movePin(map.getCenter(), { fit: true });
+
+  navigator.geolocation?.getCurrentPosition((p) => {
+    if (pinTouched || findMode !== 'pin') return;   // ผู้ใช้จัดการเองแล้ว อย่าไปแย่งหมุดเขา
+    map.setView([p.coords.latitude, p.coords.longitude], 13);
+    movePin(L.latLng(p.coords.latitude, p.coords.longitude), { fit: true });
+  });
+}
+
+// ---------- สลับโหมด ----------
+function setFindMode(mode) {
+  if (mode === findMode) return;
+  findMode = mode;
+
+  const pinMode = mode === 'pin';
+  $$('[data-mode]', view).forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  $('#radiusBar').classList.toggle('hide', !pinMode);
+  $('#btnMyLoc').classList.toggle('hide', !pinMode);
+
+  if (pinMode) {
+    if (!pinLatLng) pinLatLng = map.getCenter();
+    renderPin();
+    drawRing();
+  } else {
+    // โหมดดูงานทั้งหมด — เอาหมุดกับวงรัศมีออกให้หมด ไม่เอาตำแหน่งมาเกี่ยวเลย
+    if (dropPin) { map.removeLayer(dropPin); dropPin = null; }
+    if (radiusRing) { map.removeLayer(radiusRing); radiusRing = null; }
+  }
+  runSearch({ fit: true });
+}
+
+// ---------- หมุดที่ผู้ใช้ปัก ----------
+function renderPin() {
+  if (!pinLatLng) return;
+  if (dropPin) return dropPin.setLatLng(pinLatLng);
+
+  dropPin = L.marker(pinLatLng, {
+    icon: L.divIcon({ className: 'drop-pin', html: '<div class="drop-pin-body"></div>', iconSize: [30, 30], iconAnchor: [15, 30] }),
+    draggable: true,
+    autoPan: true,
+    zIndexOffset: 1000,   // ให้อยู่เหนือหมุดงาน จะได้ลากติดเสมอ
+  }).addTo(map);
+
+  dropPin.on('dragstart', () => { pinTouched = true; });
+  dropPin.on('dragend', () => {
+    pinLatLng = dropPin.getLatLng();
+    drawRing();
+    runSearch();   // ไม่ fit — ผู้ใช้เพิ่งจัดจอเอง อย่าไปกระตุกจอเขา
+  });
+}
+
+function movePin(latlng, opts = {}) {
+  pinLatLng = L.latLng(latlng);
+  renderPin();
+  drawRing();
+  runSearch(opts);
+}
+
+function drawRing() {
+  if (radiusRing) { map.removeLayer(radiusRing); radiusRing = null; }
+  if (findMode !== 'pin' || !pinLatLng) return;
+
+  radiusRing = L.circle(pinLatLng, {
+    radius: Number($('#radius').value) * 1000,
+    color: '#d97706', weight: 1.5, dashArray: '6 6',
+    fillColor: '#f59e0b', fillOpacity: .06,
+    interactive: false,   // ต้องปิด ไม่งั้นวงรัศมีบังคลิกวางหมุดทั้งแผนที่
+  }).addTo(map);
+}
+
+// ---------- ปุ่ม "ตำแหน่งของฉัน" ----------
+function locateMe() {
+  const btn = $('#btnMyLoc');
+  if (!navigator.geolocation) return toast('เครื่องนี้หาตำแหน่งอัตโนมัติไม่ได้ — แตะบนแผนที่เพื่อปักหมุดเองได้เลย', 4200);
+
+  btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (p) => {
+      btn.disabled = false;
+      pinTouched = true;
+      map.setView([p.coords.latitude, p.coords.longitude], 13);
+      movePin(L.latLng(p.coords.latitude, p.coords.longitude), { fit: true });
+    },
+    (err) => {
+      btn.disabled = false;
+      toast(err.code === err.PERMISSION_DENIED
+        ? 'ยังไม่ได้อนุญาตให้เข้าถึงตำแหน่ง — เปิดสิทธิ์ในเบราว์เซอร์ก่อน'
+        : 'หาตำแหน่งไม่สำเร็จ ลองใหม่อีกครั้ง', 4200);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
   );
+}
 
-  $('#search').onclick = search;
+// ---------- ค้นหา + วาดผลลง แผนที่/รายการ ----------
+async function runSearch({ fit = false } = {}) {
+  const radius = $('#radius')?.value;
+  let items = [];
+  try {
+    ({ items } = findMode === 'pin' && pinLatLng
+      ? await api(`/api/jobs?lat=${pinLatLng.lat}&lng=${pinLatLng.lng}&radius_km=${radius}`)
+      : await api('/api/jobs'));
+  } catch (e) {
+    return toast(e.message, 4200);
+  }
+  if (!map) return;   // ผู้ใช้เปลี่ยนแท็บไปแล้วระหว่างรอ
 
-  async function search() {
-    const c = map.getCenter();
-    const radius = $('#radius').value;
+  jobsLayer.clearLayers();
 
-    let items;
-    let note = '';
-
-    if (radius === 'all') {
-      ({ items } = await api('/api/jobs'));
-    } else {
-      ({ items } = await api(`/api/jobs?lat=${c.lat}&lng=${c.lng}&radius_km=${radius}`));
-
-      // ไม่เจอในรัศมี → ดึงงานทั้งหมดมาให้อัตโนมัติ ไม่ปล่อยให้หน้าจอว่างเปล่า
-      if (!items.length) {
-        ({ items } = await api('/api/jobs'));
-        if (items.length) {
-          note = `<div class="alert alert-info">
-            ไม่มีงานในรัศมี ${radius} กม. จากจุดนี้ — แสดง<strong>งานทั้งหมด ${items.length} งาน</strong>ให้แทน
-          </div>`;
-        }
-      }
+  items.forEach((j) => {
+    // ยังไม่ผ่าน KYC → เห็นแค่วงกลมคร่าว ๆ ไม่รู้ตำแหน่งจริง แต่ยังกดดูรายละเอียดได้
+    if (!j.precise) {
+      L.circle([j.lat, j.lng], {
+        radius: j.fuzz_radius_m, color: '#0e7c86', fillColor: '#0e7c86', fillOpacity: .16, weight: 1,
+      }).addTo(jobsLayer).on('click', () => openJobSheet(j));
     }
 
-    map.eachLayer((l) => { if (l instanceof L.Marker || l instanceof L.Circle) map.removeLayer(l); });
-
-    items.forEach((j) => {
-      // หมุดโชว์ราคา — กดแล้วเปิดแผ่นรายละเอียดงาน
-      const pin = L.divIcon({
+    // หมุดโชว์หัวข้องาน — กดแล้วเปิดแผ่นรายละเอียด
+    L.marker([j.lat, j.lng], {
+      icon: L.divIcon({
         className: 'pin',
-        html: `<div class="pin-body"><div class="pin-label">฿${fmtBaht(j.budget)}</div><div class="pin-tip"></div></div>`,
+        html: `<div class="pin-body"><div class="pin-label">${esc(j.title)}</div><div class="pin-tip"></div></div>`,
         iconSize: [null, null],
         iconAnchor: [0, 0],   // จัดตำแหน่งเองด้านล่าง
-      });
+      }),
+    }).addTo(jobsLayer).on('click', () => openJobSheet(j));
+  });
 
-      if (j.precise) {
-        L.marker([j.lat, j.lng], { icon: pin })
-          .addTo(map)
-          .on('click', () => openJobSheet(j));
-      } else {
-        // ยังไม่ผ่าน KYC → เห็นแค่วงกลมคร่าว ๆ ไม่รู้ตำแหน่งจริง
-        // แต่ยังกดดูรายละเอียดงานได้ (แค่ไม่เห็นที่อยู่)
-        L.circle([j.lat, j.lng], {
-          radius: j.fuzz_radius_m, color: '#0e7c86', fillColor: '#0e7c86', fillOpacity: .16, weight: 1,
-        }).addTo(map).on('click', () => openJobSheet(j));
+  // จัดหมุดให้ปลายแหลมชี้ลงตรงพิกัดพอดี
+  $$('.leaflet-marker-icon.pin').forEach((el) => {
+    el.style.marginLeft = `-${el.offsetWidth / 2}px`;
+    el.style.marginTop = `-${el.offsetHeight}px`;
+  });
 
-        L.marker([j.lat, j.lng], { icon: pin })
-          .addTo(map)
-          .on('click', () => openJobSheet(j));
-      }
-    });
+  if (fit) {
+    // โหมดหมุด: ให้เห็นวงรัศมีเต็มวง | โหมดทั้งหมด: ให้เห็นงานครบทุกงาน
+    if (findMode === 'pin' && radiusRing) map.fitBounds(radiusRing.getBounds(), { padding: [30, 30] });
+    else if (items.length) map.fitBounds(L.latLngBounds(items.map((j) => [j.lat, j.lng])), { padding: [50, 50], maxZoom: 15 });
+  }
 
-    // จัดหมุดให้ปลายแหลมชี้ลงตรงพิกัดพอดี
-    $$('.leaflet-marker-icon.pin').forEach((el) => {
-      el.style.marginLeft = `-${el.offsetWidth / 2}px`;
-      el.style.marginTop = `-${el.offsetHeight}px`;
-    });
-
-    // เลื่อน/ซูมแผนที่ให้เห็นงานทุกงานที่เจอ
-    if (items.length) {
-      const bounds = L.latLngBounds(items.map((j) => [j.lat, j.lng]));
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-    }
-
-    $('#results').innerHTML = note + (items.length
-      ? `<h2 style="margin-bottom:12px">พบ ${items.length} งาน</h2>` + items.map(jobCard).join('')
+  $('#results').innerHTML = items.length
+    ? `<h2 style="margin-bottom:12px">พบ ${items.length} งาน</h2>` + items.map(jobCard).join('')
+    : (findMode === 'pin'
+      ? `<div class="alert alert-info">
+           ไม่มีงานในรัศมี ${radius} กม. จากหมุดนี้ — ลองขยายรัศมี ย้ายหมุด หรือ
+           <button class="btn btn-sm btn-ghost" id="seeAll" style="margin-top:8px">ดูงานทั้งหมด</button>
+         </div>`
       : emptyBox('ยังไม่มีงานเปิดรับในระบบตอนนี้'));
 
-    $$('[data-detail]', $('#results')).forEach((b) => (b.onclick = () => {
-      openJobSheet(items.find((j) => String(j.id) === b.dataset.detail));
-    }));
-    $$('[data-apply]', $('#results')).forEach((b) => (b.onclick = () => applyJob(b.dataset.apply)));
-  }
+  $('#seeAll')?.addEventListener('click', () => setFindMode('all'));
+  $$('[data-detail]', $('#results')).forEach((b) => (b.onclick = () => {
+    openJobSheet(items.find((j) => String(j.id) === b.dataset.detail));
+  }));
+  $$('[data-apply]', $('#results')).forEach((b) => (b.onclick = () => applyJob(b.dataset.apply)));
 }
 
 // ==========================================================
