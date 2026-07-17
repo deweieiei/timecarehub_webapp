@@ -81,7 +81,12 @@ async function viewCard() {
 
   // ส่งคำขอจ้าง = พาไปหน้าผู้ว่าจ้าง แล้วเปิดแผ่นจ้างของคนนี้ให้เลย
   // (ฟอร์มจ้างอยู่ใน employer.js — หน้านี้ไม่โหลดไฟล์นั้น เลยส่งผ่าน query ให้หน้าโน้นเปิดเอง)
-  $('#hireBtn').onclick = () => { location.href = `/employer.html?hire=${c.id}`; };
+  // ใส่ spinner ค้างไว้ระหว่างเปลี่ยนหน้า (โหลดหน้าใหม่ใช้เวลา) — ไม่ต้องเอาออกเพราะหน้ากำลังจะทิ้งทั้งหน้า
+  $('#hireBtn').onclick = (e) => {
+    e.currentTarget.classList.add('loading');
+    e.currentTarget.disabled = true;
+    location.href = `/employer.html?hire=${c.id}`;
+  };
 
   if (hasPin) {
     const map = L.map('cardMap', { scrollWheelZoom: false }).setView([c.lat, c.lng], 14);

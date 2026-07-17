@@ -77,7 +77,7 @@ async function viewFind() {
   $$('[data-mode]', view).forEach((b) => (b.onclick = () => setFindMode(b.dataset.mode)));
   $('#btnMyLoc').onclick = locateMe;
   $('#radius').onchange = () => { drawRing(); runSearch({ fit: true }); };
-  $('#search').onclick = () => runSearch({ fit: true });
+  $('#search').onclick = (e) => withSpin(e.currentTarget, () => runSearch({ fit: true }));
 
   // ปักหมุดกลางแผนที่ไว้ก่อน จะได้มีงานให้ดูทันทีโดยไม่ต้องรอ GPS
   movePin(map.getCenter(), { fit: true });
@@ -232,7 +232,7 @@ async function runSearch({ fit = false } = {}) {
   $$('[data-detail]', $('#results')).forEach((b) => (b.onclick = () => {
     openJobSheet(items.find((j) => String(j.id) === b.dataset.detail));
   }));
-  $$('[data-apply]', $('#results')).forEach((b) => (b.onclick = () => applyJob(b.dataset.apply)));
+  $$('[data-apply]', $('#results')).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => applyJob(b.dataset.apply))));
 }
 
 // ==========================================================
@@ -301,10 +301,10 @@ function openJobSheet(j) {
     if (e.key === 'Escape') { closeSheet(); document.removeEventListener('keydown', onEsc); }
   });
 
-  backdrop.querySelector('#sheetApply').onclick = async () => {
+  backdrop.querySelector('#sheetApply').onclick = (e) => withSpin(e.currentTarget, async () => {
     await applyJob(j.id);
     closeSheet();
-  };
+  });
 }
 
 function jobCard(j) {
@@ -387,10 +387,10 @@ async function viewApplied() {
       </div>`).join('')
       : emptyBox('ยังไม่ได้ขอรับงานไหน<br>ไปที่แท็บ "หางาน"')}`;
 
-  $$('[data-accept]', view).forEach((b) => (b.onclick = () => respond(b.dataset.accept, 'accept')));
-  $$('[data-decline]', view).forEach((b) => (b.onclick = () => {
+  $$('[data-accept]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => respond(b.dataset.accept, 'accept'))));
+  $$('[data-decline]', view).forEach((b) => (b.onclick = (e) => {
     if (!confirm('ปฏิเสธคำขอจ้างนี้?')) return;
-    respond(b.dataset.decline, 'decline');
+    withSpin(e.currentTarget, () => respond(b.dataset.decline, 'decline'));
   }));
   $$('[data-chatjob]', view).forEach((b) => (b.onclick = () => {
     go('chat', CAREGIVER_VIEWS);
@@ -585,7 +585,7 @@ async function viewKyc() {
 
   $('#kycForm').onsubmit = (e) => {
     e.preventDefault();
-    saveCard(e.target, approved);
+    withSpin(e.submitter, () => saveCard(e.target, approved));
   };
 }
 
@@ -625,11 +625,9 @@ function drawServiceRing() {
 
 // ---------- บันทึก ----------
 // ยืนยันแล้ว → บันทึกเฉย ๆ ไม่แตะสถานะ | ยังไม่ยืนยัน → บันทึก + ยืนยันตัวตนรวดเดียว
+// การจัดการ spinner/กันกดซ้ำ อยู่ที่ withSpin ตอน submit แล้ว ที่นี่แค่ยิง API + re-render
 async function saveCard(form, approved) {
-  const btn = $('#cardSave');
   const data = Object.fromEntries(new FormData(form));
-
-  btn.disabled = true;
   try {
     await api(approved ? '/api/kyc/profile' : '/api/kyc/verify', {
       method: 'POST',
@@ -644,7 +642,6 @@ async function saveCard(form, approved) {
     viewKyc();
   } catch (err) {
     toast(err.message, 4500);
-    btn.disabled = false;
   }
 }
 

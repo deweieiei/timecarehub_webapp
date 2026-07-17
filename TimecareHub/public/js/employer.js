@@ -66,18 +66,6 @@ async function viewBrowse() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="row" style="align-items:flex-end;margin:0">
-        <div class="field" style="margin:0;flex:2">
-          <label>กรองด้วยชื่อ / ทักษะ <span class="hint" style="display:inline;font-weight:400">(ไม่ใส่ก็ได้)</span></label>
-          <input id="q" placeholder="ติดเตียง · ผู้ช่วยพยาบาล · ทำกายภาพ">
-        </div>
-        <div class="field" style="margin:0">
-          <button class="btn btn-block btn-ghost" id="doSearch" type="button">กรอง</button>
-        </div>
-      </div>
-    </div>
-
     <div id="results" style="margin-top:16px"></div>`;
 
   $$('[data-bmode]', view).forEach((b) => (b.onclick = () => setBrowseMode(b.dataset.bmode)));
@@ -91,12 +79,9 @@ async function viewBrowse() {
     browsePicker.map.setZoom(ZOOM_FOR[$('#browseRadius').value]);   // ซูมออกให้เห็นวงเต็ม
     runBrowse();   // ถ้าซูมเท่าเดิมอยู่แล้ว moveend จะไม่ยิง — ต้องสั่งค้นหาเอง
   };
-  $('#browseSearch').onclick = () => runBrowse();
+  $('#browseSearch').onclick = (e) => withSpin(e.currentTarget, () => runBrowse());
   $('#placeFindBtn').onclick = () => browsePicker.search($('#placeFind').value.trim(), $('#placeFindBtn'));
   $('#placeFind').onkeydown = (e) => { if (e.key === 'Enter') browsePicker.search($('#placeFind').value.trim(), $('#placeFindBtn')); };
-
-  $('#doSearch').onclick = () => runBrowse();
-  $('#q').onkeydown = (e) => { if (e.key === 'Enter') runBrowse(); };
 
   drawSearchRing();
   runBrowse();
@@ -162,12 +147,10 @@ function drawSearchRing() {
 async function runBrowse() {
   if (!browsePicker) return;
 
-  const q = $('#q')?.value.trim() || '';
   const radius = $('#browseRadius').value;
   const c = browsePicker.center();
 
   const params = new URLSearchParams();
-  if (q) params.set('q', q);
   if (browseMode === 'pin') {
     params.set('lat', c.lat);
     params.set('lng', c.lng);
@@ -189,7 +172,7 @@ async function runBrowse() {
        ${browseItems.map(cgCard).join('')}`
     : (browseMode === 'pin'
       ? `<div class="alert alert-info">
-           ไม่มีแคร์กิฟเวอร์รับงานในรัศมี ${radius} กม. จากหมุดนี้${q ? ` ที่ตรงกับ "${esc(q)}"` : ''} —
+           ไม่มีแคร์กิฟเวอร์รับงานในรัศมี ${radius} กม. จากหมุดนี้ —
            ลองขยายรัศมี ย้ายหมุด หรือ
            <button class="btn btn-sm btn-ghost" id="seeAllCg" style="margin-top:8px">ดูทั้งหมด</button>
          </div>`
@@ -365,16 +348,18 @@ function openHireSheet(c) {
   backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
   backdrop.querySelector('.sheet-close').onclick = close;
 
-  backdrop.querySelector('#hireForm').onsubmit = async (e) => {
+  backdrop.querySelector('#hireForm').onsubmit = (e) => {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
-    data.caregiver_id = c.id;
-    try {
-      await api('/api/hires', { method: 'POST', body: JSON.stringify(data) });
-      close();
-      toast('ส่งคำขอจ้างแล้ว — รอเขาตอบรับ');
-      go('myjobs', EMPLOYER_VIEWS);
-    } catch (err) { toast(err.message, 4200); }
+    withSpin(e.submitter, async () => {
+      const data = Object.fromEntries(new FormData(e.target));
+      data.caregiver_id = c.id;
+      try {
+        await api('/api/hires', { method: 'POST', body: JSON.stringify(data) });
+        close();
+        toast('ส่งคำขอจ้างแล้ว — รอเขาตอบรับ');
+        go('myjobs', EMPLOYER_VIEWS);
+      } catch (err) { toast(err.message, 4200); }
+    });
   };
 }
 
@@ -474,18 +459,20 @@ function viewPost() {
     findAddr();
   };
 
-  $('#jobForm').onsubmit = async (e) => {
+  $('#jobForm').onsubmit = (e) => {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
-    const c = postPicker.center();
-    data.lat = c.lat;
-    data.lng = c.lng;
-    data.area_label = pickArea || null;   // ไม่ต้องให้ผู้ใช้พิมพ์ — อ่านจากหมุดให้เลย
-    try {
-      await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
-      toast('โพสงานแล้ว รอแคร์กิฟเวอร์กดขอรับงาน');
-      go('myjobs', EMPLOYER_VIEWS);
-    } catch (err) { toast(err.message); }
+    withSpin(e.submitter, async () => {
+      const data = Object.fromEntries(new FormData(e.target));
+      const c = postPicker.center();
+      data.lat = c.lat;
+      data.lng = c.lng;
+      data.area_label = pickArea || null;   // ไม่ต้องให้ผู้ใช้พิมพ์ — อ่านจากหมุดให้เลย
+      try {
+        await api('/api/jobs', { method: 'POST', body: JSON.stringify(data) });
+        toast('โพสงานแล้ว รอแคร์กิฟเวอร์กดขอรับงาน');
+        go('myjobs', EMPLOYER_VIEWS);
+      } catch (err) { toast(err.message); }
+    });
   };
 }
 
@@ -509,12 +496,14 @@ async function viewMyJobs() {
     <h3 style="font-size:16px;margin:22px 0 10px">งานที่โพสไว้ (${posted.length})</h3>
     ${posted.length ? posted.map(jobCard).join('') : emptyBox('ยังไม่ได้โพสงาน')}`;
 
-  $$('[data-applicants]', view).forEach((b) => (b.onclick = () => showApplicants(b.dataset.applicants)));
-  $$('[data-complete]', view).forEach((b) => (b.onclick = async () => {
-    await api(`/api/jobs/${b.dataset.complete}/complete`, { method: 'POST' });
-    toast('ปิดงานเรียบร้อย');
-    viewMyJobs();
-  }));
+  $$('[data-applicants]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => showApplicants(b.dataset.applicants))));
+  $$('[data-complete]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, async () => {
+    try {
+      await api(`/api/jobs/${b.dataset.complete}/complete`, { method: 'POST' });
+      toast('ปิดงานเรียบร้อย');
+      viewMyJobs();
+    } catch (err) { toast(err.message); }
+  })));
   $$('[data-chatjob]', view).forEach((b) => (b.onclick = () => {
     go('chat', EMPLOYER_VIEWS);
     setTimeout(() => openChat(b.dataset.chatjob, b.dataset.other), 250);
@@ -607,13 +596,15 @@ async function showApplicants(jobId) {
 
   $('#back').onclick = viewMyJobs;
 
-  $$('[data-choose]', view).forEach((b) => (b.onclick = async () => {
+  $$('[data-choose]', view).forEach((b) => (b.onclick = (ev) => {
     if (!confirm('ยืนยันเลือกแคร์กิฟเวอร์คนนี้?\nคนอื่นจะถูกปฏิเสธอัตโนมัติ')) return;
-    try {
-      await api(`/api/jobs/${jobId}/choose/${b.dataset.choose}`, { method: 'POST' });
-      toast('เลือกแล้ว — คุยรายละเอียดกันต่อในแชทได้เลย');
-      viewMyJobs();
-    } catch (e) { toast(e.message); }
+    withSpin(ev.currentTarget, async () => {
+      try {
+        await api(`/api/jobs/${jobId}/choose/${b.dataset.choose}`, { method: 'POST' });
+        toast('เลือกแล้ว — คุยรายละเอียดกันต่อในแชทได้เลย');
+        viewMyJobs();
+      } catch (e) { toast(e.message); }
+    });
   }));
 
   $$('[data-chat]', view).forEach((b) => (b.onclick = () => {

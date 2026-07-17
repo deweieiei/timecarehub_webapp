@@ -281,6 +281,18 @@ h2 { font-size: 21px; font-weight: 700; letter-spacing: -.3px; }
 .btn-sm { padding: 9px 14px; font-size: 14px; border-radius: 10px; }
 .btn-block { width: 100%; }
 
+/* ปุ่มกำลังโหลด — ซ่อนตัวหนังสือ แล้วโชว์วงกลมหมุนตรงกลาง กันกดซ้ำ */
+.btn.loading { color: transparent !important; pointer-events: none; position: relative; }
+.btn.loading::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  border: 2.5px solid rgba(255, 255, 255, .45); border-top-color: #fff;
+  border-radius: 50%; animation: btnSpin .6s linear infinite;
+}
+/* ปุ่มพื้นขาว (ghost/amber-ghost) วงหมุนต้องเป็นสีเทียล ไม่งั้นขาวบนขาวมองไม่เห็น */
+.btn-ghost.loading::after { border-color: rgba(14, 124, 134, .25); border-top-color: var(--teal); }
+@keyframes btnSpin { to { transform: rotate(360deg); } }
+
 /* ============================================================
    ฟอร์ม
    ============================================================ */

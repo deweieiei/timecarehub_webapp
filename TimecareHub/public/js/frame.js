@@ -71,6 +71,23 @@ async function api(url, opts = {}) {
   return j;
 }
 
+// ปุ่มไหนกดแล้วต้องรอเน็ต ครอบ handler ด้วยตัวนี้ — โชว์วงกลมหมุน + กันกดซ้ำระหว่างรอ
+// ใช้: btn.onclick = (e) => withSpin(e.currentTarget, () => doSomethingAsync());
+async function withSpin(btn, fn) {
+  if (!btn || btn.classList.contains('loading')) return;   // กดซ้ำระหว่างยังหมุนอยู่ = ไม่ทำอะไร
+  btn.classList.add('loading');
+  btn.disabled = true;
+  try {
+    return await fn();
+  } finally {
+    // ปุ่มอาจถูกลบไปแล้ว (เช่น handler สั่ง re-render ทั้งหน้า) — เช็คก่อนแตะ
+    if (btn.isConnected) {
+      btn.classList.remove('loading');
+      btn.disabled = false;
+    }
+  }
+}
+
 function toast(text, ms = 2800) {
   const t = $('#toast');
   t.textContent = text;
@@ -178,7 +195,7 @@ function wirePhotoPicker({ root = document, onChange } = {}) {
     if (!file) return;
 
     pickBtn.disabled = true;
-    pickBtn.textContent = 'กำลังอัป…';
+    pickBtn.classList.add('loading');   // วงกลมหมุนระหว่างย่อรูป + อัป
     try {
       const body = new FormData();
       body.append('photo', await shrinkImage(file), 'photo.jpg');
@@ -190,17 +207,20 @@ function wirePhotoPicker({ root = document, onChange } = {}) {
       render(ME?.photo_url);
     } finally {
       pickBtn.disabled = false;
+      pickBtn.classList.remove('loading');
       fileInput.value = '';   // เลือกไฟล์เดิมซ้ำต้องยิง change ได้อีก
     }
   };
 
-  delBtn.onclick = async () => {
+  delBtn.onclick = (e) => {
     if (!confirm('ลบรูปโปรไฟล์?')) return;
-    try {
-      await api('/api/profile/me/photo', { method: 'DELETE' });
-      render(null);
-      toast('ลบรูปแล้ว');
-    } catch (e) { toast(e.message); }
+    withSpin(e.currentTarget, async () => {
+      try {
+        await api('/api/profile/me/photo', { method: 'DELETE' });
+        render(null);
+        toast('ลบรูปแล้ว');
+      } catch (err) { toast(err.message); }
+    });
   };
 }
 
@@ -267,10 +287,10 @@ async function buildFrame({ role, tabs = [], render = {} } = {}) {
 
   view = $('#view');
 
-  $('#logout').onclick = async () => {
+  $('#logout').onclick = (e) => withSpin(e.currentTarget, async () => {
     await api('/api/auth/logout', { method: 'POST' });
     location.href = '/';
-  };
+  });
 
   // เมนู 3 ขีด (จอแคบ)
   const toggle = $('#menuToggle');

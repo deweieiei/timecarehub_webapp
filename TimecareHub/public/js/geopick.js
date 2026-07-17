@@ -115,8 +115,7 @@ function createPicker({ id = 'pickMap', center = BKK, zoom = 13, autoLocate = tr
       }
       touched = true;
 
-      const label = btn?.textContent;
-      if (btn) { btn.disabled = true; btn.textContent = 'กำลังค้นหา…'; }
+      if (btn) { btn.disabled = true; btn.classList.add('loading'); }
       try {
         const r = await fetch(
           `${NOMINATIM}/search?format=jsonv2&limit=1&countrycodes=th&accept-language=th&q=${encodeURIComponent(q)}`
@@ -132,7 +131,7 @@ function createPicker({ id = 'pickMap', center = BKK, zoom = 13, autoLocate = tr
         toast('ค้นหาไม่สำเร็จ ลองใหม่อีกครั้ง');
         return false;
       } finally {
-        if (btn) { btn.disabled = false; btn.textContent = label; }
+        if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
       }
     },
   };

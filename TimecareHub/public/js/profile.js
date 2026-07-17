@@ -257,21 +257,19 @@ async function viewProfile() {
   // --- ติ๊ก "เหมือนที่อยู่ตามบัตร" → ซ่อนฟอร์มที่อยู่ปัจจุบัน ---
   $('#curSame').onchange = (e) => $('#curAddr').classList.toggle('hide', e.target.checked);
 
-  $('#profileForm').onsubmit = async (e) => {
+  $('#profileForm').onsubmit = (e) => {
     e.preventDefault();
-    const btn = $('#saveBtn');
-    const data = Object.fromEntries(new FormData(e.target));
-    data.cur_same_as_addr = $('#curSame').checked ? 1 : 0;   // checkbox ที่ไม่ติ๊กจะไม่โผล่ใน FormData
-
-    btn.disabled = true;
-    try {
-      await api('/api/profile/me', { method: 'PUT', body: JSON.stringify(data) });
-      toast('บันทึกโปรไฟล์แล้ว');
-      viewProfile();
-    } catch (err) {
-      toast(err.message, 4500);
-      btn.disabled = false;
-    }
+    withSpin(e.submitter, async () => {
+      const data = Object.fromEntries(new FormData(e.target));
+      data.cur_same_as_addr = $('#curSame').checked ? 1 : 0;   // checkbox ที่ไม่ติ๊กจะไม่โผล่ใน FormData
+      try {
+        await api('/api/profile/me', { method: 'PUT', body: JSON.stringify(data) });
+        toast('บันทึกโปรไฟล์แล้ว');
+        viewProfile();
+      } catch (err) {
+        toast(err.message, 4500);
+      }
+    });
   };
 }
 
