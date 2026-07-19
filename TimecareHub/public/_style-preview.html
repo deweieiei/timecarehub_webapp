@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<title>ตัวอย่างสี — TimeCareHub</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="#">
+      <div class="brand-mark" style="display:grid;place-items:center;color:#0b6fa4;font-size:20px">♥</div>
+      <span class="brand-text">
+        <strong>TIMECAREHUB</strong>
+        <small>จับคู่ผู้ดูแลผู้สูงอายุ</small>
+      </span>
+    </a>
+    <span class="spacer"></span>
+    <div class="header-actions">
+      <div class="user-bar">
+        <div class="avatar">ด</div>
+        <div class="user-meta">
+          <strong>คุณดิว</strong>
+          <span class="role-chip role-employer">ผู้ว่าจ้าง</span>
+        </div>
+      </div>
+      <button class="icon-btn">⌂</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <h2>งานใกล้คุณ</h2>
+  <p class="sub">ทั้งหมด 4 งานในรัศมี 5 กม.</p>
+
+  <div class="alert alert-info">ยืนยันตัวตนแล้ว — รับงานได้ทันที</div>
+  <div class="alert alert-ok">บันทึกโปรไฟล์เรียบร้อย</div>
+  <div class="alert alert-warn">ยังไม่ได้อัปโหลดบัตรประชาชน</div>
+  <div class="alert alert-err">รหัสผ่านไม่ถูกต้อง</div>
+
+  <div class="job">
+    <div class="job-top">
+      <h3>ดูแลคุณยาย กลางวัน จันทร์–ศุกร์</h3>
+      <div class="price">฿850<small>ต่อวัน</small></div>
+    </div>
+    <div class="meta">
+      <span class="chip">บางกะปิ</span>
+      <span class="chip">8 ชม./วัน</span>
+      <span class="chip-near chip">ห่าง 1.2 กม.</span>
+      <span class="badge badge-open">เปิดรับ</span>
+    </div>
+    <div class="job-actions">
+      <button class="btn">ขอรับงาน</button>
+      <button class="btn btn-ghost">ดูรายละเอียด</button>
+    </div>
+  </div>
+
+  <div class="job">
+    <div class="job-top">
+      <h3>เฝ้าไข้กลางคืน โรงพยาบาลรามาฯ</h3>
+      <div class="price">฿1,200<small>ต่อคืน</small></div>
+    </div>
+    <div class="meta">
+      <span class="chip">ราชเทวี</span>
+      <span class="badge badge-matched">จับคู่แล้ว</span>
+      <span class="badge badge-pending">รอยืนยัน</span>
+      <span class="badge badge-done">เสร็จสิ้น</span>
+      <span class="badge badge-rejected">ถูกปฏิเสธ</span>
+    </div>
+    <div class="job-actions">
+      <button class="btn btn-amber">เสนอราคา</button>
+      <button class="btn btn-danger">ยกเลิก</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">โปรไฟล์ของคุณ</div>
+    <div class="field">
+      <label>ชื่อที่แสดง</label>
+      <input value="ดิว">
+    </div>
+    <div class="field">
+      <label>เขตที่รับงาน</label>
+      <select><option>บางกะปิ</option></select>
+    </div>
+    <div class="bar" style="margin-top:12px"><span style="width:72%"></span></div>
+    <p class="hint">ความสมบูรณ์ของโปรไฟล์ 72%</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">ตัวอย่างแชท</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="msg them">สวัสดีค่ะ สนใจงานนี้อยู่ไหมคะ</div>
+      <div class="msg me">สนใจครับ เริ่มได้วันจันทร์เลย</div>
+    </div>
+  </div>
+
+  <div class="choose-grid">
+    <button class="choose-card employer">
+      <div class="choose-icon">👤</div>
+      <strong>ผู้ว่าจ้าง</strong>
+      <p>ประกาศหาคนดูแลผู้สูงอายุ</p>
+      <span class="choose-go">เริ่มเลย →</span>
+    </button>
+    <button class="choose-card caregiver">
+      <div class="choose-icon">🤝</div>
+      <strong>ผู้ดูแล</strong>
+      <p>รับงานดูแลใกล้บ้านคุณ</p>
+      <span class="choose-go">เริ่มเลย →</span>
+    </button>
+  </div>
+</main>
+
+<nav class="tabbar">
+  <button class="on"><span class="tab-icon">◉</span>หางาน</button>
+  <button><span class="tab-icon">◎<span class="tab-badge">3</span></span>แชท</button>
+  <button><span class="tab-icon">◎</span>โปรไฟล์</button>
+</nav>
+
+</body>
+</html>

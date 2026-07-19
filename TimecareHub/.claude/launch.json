@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "const http=require('http'),fs=require('fs'),p=require('path');const t={'.html':'text/html','.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.png':'image/png'};http.createServer((q,r)=>{let f=p.join('public',decodeURIComponent(q.url.split('?')[0]));if(f.endsWith(p.sep))f+='index.html';fs.readFile(f,(e,d)=>{if(e){r.writeHead(404);return r.end('404')}r.writeHead(200,{'Content-Type':t[p.extname(f)]||'application/octet-stream'});r.end(d)})}).listen(4321,()=>console.log('preview on 4321'))"],
+      "port": 4321
+    }
+  ]
+}

@@ -138,8 +138,8 @@ function drawSearchRing() {
   // สีเขียนตรง ๆ ไม่ใช้ var(--amber-dark): Leaflet ยัดค่านี้ลง attribute ของ SVG ซึ่ง var() ใช้ไม่ได้
   searchRing = L.circle(at, {
     radius,
-    color: '#d97706', weight: 1.5, dashArray: '6 6',
-    fillColor: '#f59e0b', fillOpacity: .06,
+    color: '#b06305', weight: 1.5, dashArray: '6 6',
+    fillColor: '#f5a524', fillOpacity: .06,
     interactive: false,
   }).addTo(browsePicker.map);
 }

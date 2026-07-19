@@ -144,8 +144,8 @@ function drawRing() {
 
   radiusRing = L.circle(pinLatLng, {
     radius: Number($('#radius').value) * 1000,
-    color: '#d97706', weight: 1.5, dashArray: '6 6',
-    fillColor: '#f59e0b', fillOpacity: .06,
+    color: '#b06305', weight: 1.5, dashArray: '6 6',
+    fillColor: '#f5a524', fillOpacity: .06,
     interactive: false,   // ต้องปิด ไม่งั้นวงรัศมีบังคลิกวางหมุดทั้งแผนที่
   }).addTo(map);
 }
