@@ -48,18 +48,24 @@ TimecareHub/
 ├── server.js              จุดเริ่มต้น (Express + Socket.IO เกาะพอร์ต 8091 ร่วมกัน)
 ├── .env                   รหัส DB + JWT secret — 🔴 ไม่อยู่บน git มีที่เดียวบน server
 ├── db/
-│   ├── schema.sql         ตารางหลัก 6 ตาราง
+│   ├── schema.sql         ตารางหลัก 6 ตาราง (⚠️ migrate รันเป็นไฟล์สุดท้าย — DB ใหม่ต้องยัดอันนี้เองก่อน ดู 06_DEPLOY)
 │   ├── 002_direct_hire.sql   เพิ่มระบบจ้างตรง
 │   ├── 003_user_profile.sql  เพิ่มโปรไฟล์ผู้ใช้ 31 คอลัมน์
-│   ├── 004_chat_upgrade.sql  🆕 รูปในแชท + last_seen_at
+│   ├── 004_chat_upgrade.sql  รูปในแชท + last_seen_at
+│   ├── 005_chat_idempotency.sql  กันข้อความซ้ำตอนกดส่งใหม่
+│   ├── 006_caregiver_geo_photo.sql  รูปโปรไฟล์ + ย่านที่รับงาน
+│   ├── 007_cancel.sql     ยกเลิกงาน + เหตุผล
+│   ├── 008_time_geo_expiry_notify.sql  🆕 เวลาทำงาน · วันหมดอายุประกาศ · ตาราง notifications
 │   ├── migrate.js         npm run migrate — รันไฟล์ .sql เรียงตามชื่อ ข้ามอันที่มีแล้ว
 │   └── seed.js            npm run seed — แคร์กิฟเวอร์ตัวอย่าง 5 คน
 ├── src/
 │   ├── db.js              MySQL pool — ⚠️ SET time_zone='+00:00' อย่าลบ (อ่านหมายเหตุในไฟล์)
 │   ├── auth.js            JWT + middleware เช็คสิทธิ์
 │   ├── geo.js             ⭐ ตรรกะเปิดเผยพิกัด 2 ระดับ
-│   ├── chat-core.js       🆕⭐ เช็คสิทธิ์แชทที่เดียวจบ — REST กับ socket เรียกตัวเดียวกัน
-│   ├── realtime.js        🆕 Socket.IO — ข้อความสด · ออนไลน์ · กำลังพิมพ์ · อ่านแล้ว
+│   ├── util.js            ageFrom · num · readTime (แปลงค่าจากฟอร์ม)
+│   ├── chat-core.js       ⭐ เช็คสิทธิ์แชทที่เดียวจบ — REST กับ socket เรียกตัวเดียวกัน
+│   ├── realtime.js        Socket.IO — ข้อความสด · ออนไลน์ · กำลังพิมพ์ · อ่านแล้ว · แจ้งเตือน
+│   ├── notify.js          🆕 เขียนแจ้งเตือนลง DB + เด้งสดผ่าน socket (กลืน error เอง)
 │   └── routes/            auth · profile · jobs · caregivers · hires · kyc · chat · notifications · reviews(⏸)
 ├── public/
 │   ├── index.html         เข้าสู่ระบบ / สมัคร

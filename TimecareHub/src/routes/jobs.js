@@ -3,17 +3,27 @@ const db = require('../db');
 const { requireAuth, requireApprovedCaregiver } = require('../auth');
 const { maskJob } = require('../geo');
 const { photoUrl } = require('../photo');
+const { notify, notifyMany } = require('../notify');
+const { num, readTime } = require('../util');
 
 const router = express.Router();
 
 const CARE_TYPES = ['hourly', 'daily', 'overnight', 'live_in'];
 const BUDGET_UNITS = ['per_hour', 'per_day', 'per_month', 'total'];
 
+// ประกาศงานอยู่ได้กี่วันก่อนหายไปจากหน้าค้นหา (ตกลงกับพี่ดิว ข้อ 9)
+// อยู่ตรงนี้ที่เดียว — วันไหนอยากเปลี่ยนเป็น 30 วัน แก้บรรทัดนี้บรรทัดเดียว
+const POST_LIFETIME_DAYS = 14;
+
+// งานที่ยัง "มีชีวิต" ให้แคร์กิฟเวอร์เห็น — เปิดรับอยู่ และยังไม่หมดอายุ
+// (งานเก่าก่อนรอบ 008 ที่ expires_at เป็น NULL ให้ถือว่าไม่มีวันหมดอายุ ไม่ใช่หมดอายุแล้ว)
+const ALIVE = "j.status = 'open' AND j.hire_type = 'open' AND (j.expires_at IS NULL OR j.expires_at > NOW())";
+
 // ---------- ผู้ว่าจ้าง: โพสงาน ----------
 router.post('/', requireAuth, async (req, res) => {
   const {
     title, elder_condition, tasks, care_type, start_date, end_date,
-    budget, budget_unit, lat, lng, address, area_label,
+    start_time, end_time, budget, budget_unit, lat, lng, address, area_label,
   } = req.body;
 
   if (!title || !budget || lat == null || lng == null) {
@@ -25,15 +35,17 @@ router.post('/', requireAuth, async (req, res) => {
   const [r] = await db.query(
     `INSERT INTO jobs
        (employer_id, title, elder_condition, tasks, care_type, start_date, end_date,
-        budget, budget_unit, lat, lng, address, area_label)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        start_time, end_time, budget, budget_unit, lat, lng, address, area_label,
+        status_changed_at, expires_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, NOW(), NOW() + INTERVAL ? DAY)`,
     [
       req.user.id, title, elder_condition || null, tasks || null, care_type,
-      start_date || null, end_date || null, budget, budget_unit,
-      lat, lng, address || null, area_label || null,
+      start_date || null, end_date || null, readTime(start_time), readTime(end_time),
+      budget, budget_unit, lat, lng, address || null, area_label || null,
+      POST_LIFETIME_DAYS,
     ]
   );
-  res.json({ ok: true, id: r.insertId });
+  res.json({ ok: true, id: r.insertId, lifetime_days: POST_LIFETIME_DAYS });
 });
 
 // ---------- แคร์กิฟเวอร์: หางานตามรัศมี ----------
@@ -49,7 +61,7 @@ router.get('/', requireAuth, async (req, res) => {
            (SELECT COUNT(*) FROM job_applications a WHERE a.job_id = j.id) AS applicant_count
       FROM jobs j
       JOIN users u ON u.id = j.employer_id
-     WHERE j.status = 'open' AND j.hire_type = 'open'`;
+     WHERE ${ALIVE}`;
   const params = [];
 
   // สูตร Haversine — คำนวณระยะทางบนผิวโลก
@@ -62,7 +74,7 @@ router.get('/', requireAuth, async (req, res) => {
                 COS(RADIANS(j.lng) - RADIANS(?)) + SIN(RADIANS(?)) * SIN(RADIANS(j.lat))))) AS distance_km
           FROM jobs j
           JOIN users u ON u.id = j.employer_id
-         WHERE j.status = 'open' AND j.hire_type = 'open'
+         WHERE ${ALIVE}
       ) t
       WHERE t.distance_km <= ?
       ORDER BY t.distance_km ASC
@@ -78,9 +90,12 @@ router.get('/', requireAuth, async (req, res) => {
 
 // ---------- งานของฉัน (ทั้ง 2 บทบาท) ----------
 router.get('/mine', requireAuth, async (req, res) => {
+  // ฝั่งเจ้าของประกาศยังเห็นงานที่หมดอายุอยู่ — แค่ติดป้ายบอกว่าหมดแล้ว
+  // (หายไปจากหน้าค้นหา ไม่ได้แปลว่าต้องหายไปจากสายตาคนโพสด้วย เขาต้องรู้ว่าทำไมไม่มีคนสมัคร)
   const [posted] = await db.query(
     `SELECT j.*, (SELECT COUNT(*) FROM job_applications a WHERE a.job_id = j.id) AS applicant_count,
-            cg.full_name AS caregiver_name
+            cg.full_name AS caregiver_name,
+            (j.status = 'open' AND j.expires_at IS NOT NULL AND j.expires_at <= NOW()) AS expired
        FROM jobs j
        LEFT JOIN users cg ON cg.id = j.assigned_caregiver_id
       WHERE j.employer_id = ? AND j.hire_type = 'open'
@@ -100,7 +115,9 @@ router.get('/mine', requireAuth, async (req, res) => {
   );
 
   res.json({
-    posted,
+    // lat/lng เป็น DECIMAL → mysql2 คืนมาเป็นสตริง ต้องแปลงก่อนส่งออก ไม่งั้น Leaflet ปักหมุดไม่ขึ้น
+    // (ฝั่ง applied ผ่าน maskJob ซึ่งแตะพิกัดอยู่แล้ว แต่ฝั่ง posted ไม่ได้ผ่าน)
+    posted: posted.map((j) => ({ ...j, lat: num(j.lat), lng: num(j.lng), expired: !!j.expired })),
     applied: applied.map((j) => maskJob(j, req.user)),
   });
 });
@@ -108,8 +125,11 @@ router.get('/mine', requireAuth, async (req, res) => {
 // ---------- รายละเอียดงาน 1 ตัว ----------
 router.get('/:id', requireAuth, async (req, res) => {
   const [rows] = await db.query(
-    `SELECT j.*, u.full_name AS employer_name, u.phone AS employer_phone
-       FROM jobs j JOIN users u ON u.id = j.employer_id
+    `SELECT j.*, u.full_name AS employer_name, u.phone AS employer_phone,
+            cg.full_name AS caregiver_name
+       FROM jobs j
+       JOIN users u ON u.id = j.employer_id
+       LEFT JOIN users cg ON cg.id = COALESCE(j.assigned_caregiver_id, j.target_caregiver_id)
       WHERE j.id = ?`,
     [req.params.id]
   );
@@ -123,6 +143,9 @@ router.post('/:id/apply', requireAuth, requireApprovedCaregiver, async (req, res
   const job = rows[0];
   if (!job) return res.status(404).json({ error: 'ไม่พบงานนี้' });
   if (job.status !== 'open') return res.status(400).json({ error: 'งานนี้ปิดรับแล้ว' });
+  if (job.expires_at && new Date(job.expires_at) <= new Date()) {
+    return res.status(400).json({ error: 'ประกาศงานนี้หมดอายุแล้ว' });
+  }
   if (job.employer_id === req.user.id) {
     return res.status(400).json({ error: 'ขอรับงานที่ตัวเองโพสไม่ได้' });
   }
@@ -132,11 +155,18 @@ router.post('/:id/apply', requireAuth, requireApprovedCaregiver, async (req, res
       'INSERT INTO job_applications (job_id, caregiver_id, message) VALUES (?,?,?)',
       [job.id, req.user.id, req.body.message || null]
     );
-    res.json({ ok: true });
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'คุณกดขอรับงานนี้ไปแล้ว' });
     throw e;
   }
+
+  await notify(job.employer_id, {
+    jobId: job.id,
+    type: 'job_applied',
+    title: 'มีคนกดขอรับงานของคุณ',
+    body: `${req.user.full_name} กดขอรับงาน "${job.title}"`,
+  });
+  res.json({ ok: true });
 });
 
 // ---------- ผู้ว่าจ้าง: ดูรายชื่อคนที่กดขอรับ ----------
@@ -167,11 +197,15 @@ router.get('/:id/applicants', requireAuth, async (req, res) => {
 // ---------- ผู้ว่าจ้าง: เลือกแคร์กิฟเวอร์ 1 คน ----------
 router.post('/:id/choose/:caregiverId', requireAuth, async (req, res) => {
   const conn = await db.getConnection();
+  let picked = null;
+  let passedOver = [];
+  let job = null;
+
   try {
     await conn.beginTransaction();
 
     const [jobs] = await conn.query('SELECT * FROM jobs WHERE id = ? FOR UPDATE', [req.params.id]);
-    const job = jobs[0];
+    job = jobs[0];
     if (!job) throw Object.assign(new Error('ไม่พบงานนี้'), { status: 404 });
     if (job.employer_id !== req.user.id) throw Object.assign(new Error('ไม่ใช่งานของคุณ'), { status: 403 });
     if (job.status !== 'open') throw Object.assign(new Error('งานนี้เลือกคนไปแล้ว'), { status: 400 });
@@ -182,8 +216,16 @@ router.post('/:id/choose/:caregiverId', requireAuth, async (req, res) => {
     );
     if (!apps.length) throw Object.assign(new Error('คนนี้ไม่ได้กดขอรับงานนี้'), { status: 400 });
 
+    // เก็บรายชื่อคนที่ไม่ถูกเลือกไว้ก่อน UPDATE — หลังจากนี้แยกไม่ออกแล้วว่าใครเพิ่งโดนปฏิเสธรอบนี้
+    const [others] = await conn.query(
+      "SELECT caregiver_id FROM job_applications WHERE job_id = ? AND caregiver_id <> ? AND status = 'pending'",
+      [job.id, req.params.caregiverId]
+    );
+    passedOver = others.map((o) => o.caregiver_id);
+    picked = Number(req.params.caregiverId);
+
     await conn.query(
-      "UPDATE jobs SET status = 'matched', assigned_caregiver_id = ? WHERE id = ?",
+      "UPDATE jobs SET status = 'matched', assigned_caregiver_id = ?, status_changed_at = NOW() WHERE id = ?",
       [req.params.caregiverId, job.id]
     );
     await conn.query(
@@ -196,13 +238,28 @@ router.post('/:id/choose/:caregiverId', requireAuth, async (req, res) => {
     );
 
     await conn.commit();
-    res.json({ ok: true });
   } catch (e) {
     await conn.rollback();
-    res.status(e.status || 500).json({ error: e.message || 'เลือกแคร์กิฟเวอร์ไม่สำเร็จ' });
-  } finally {
     conn.release();
+    return res.status(e.status || 500).json({ error: e.message || 'เลือกแคร์กิฟเวอร์ไม่สำเร็จ' });
   }
+  conn.release();
+
+  // แจ้งเตือนหลัง commit — ไม่เอามาแขวนอยู่ในทรานแซกชัน (ล็อกแถวค้างระหว่างรอเขียนแจ้งเตือนไม่คุ้ม)
+  await notify(picked, {
+    jobId: job.id,
+    type: 'job_matched',
+    title: 'คุณได้รับเลือกให้ทำงานนี้',
+    body: `"${job.title}" — คุยรายละเอียดกับผู้ว่าจ้างในแชทได้เลย`,
+  });
+  await notifyMany(passedOver, {
+    jobId: job.id,
+    type: 'job_not_chosen',
+    title: 'ผู้ว่าจ้างเลือกคนอื่นแล้ว',
+    body: `งาน "${job.title}" ปิดรับสมัครแล้ว`,
+  });
+
+  res.json({ ok: true });
 });
 
 // ---------- ปิดงาน (ผู้ว่าจ้างกดเมื่องานเสร็จ) ----------
@@ -213,7 +270,14 @@ router.post('/:id/complete', requireAuth, async (req, res) => {
   if (job.employer_id !== req.user.id) return res.status(403).json({ error: 'ไม่ใช่งานของคุณ' });
   if (job.status !== 'matched') return res.status(400).json({ error: 'งานนี้ยังไม่ได้จับคู่' });
 
-  await db.query("UPDATE jobs SET status = 'done' WHERE id = ?", [job.id]);
+  await db.query("UPDATE jobs SET status = 'done', status_changed_at = NOW() WHERE id = ?", [job.id]);
+
+  await notify(job.assigned_caregiver_id, {
+    jobId: job.id,
+    type: 'job_done',
+    title: 'งานถูกปิดแล้ว',
+    body: `ผู้ว่าจ้างกดปิดงาน "${job.title}" เรียบร้อย — ห้องแชทของงานนี้ถูกซ่อนแล้ว`,
+  });
   res.json({ ok: true });
 });
 
@@ -232,7 +296,20 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
   // ก่อนจับคู่ → ถอนทิ้ง ไม่เก็บประวัติ (แคร์กิฟเวอร์ยังไม่ผูกกับงาน ให้ถอนได้เฉพาะผู้ว่าจ้าง)
   if (job.status === 'open' || job.status === 'offered') {
     if (!isEmployer) return res.status(403).json({ error: 'ยังไม่ได้ตอบรับงาน — ถอนได้เฉพาะฝั่งผู้ว่าจ้าง' });
+
+    // ต้องอ่านรายชื่อผู้สมัครก่อนลบงาน — พอลบแล้ว job_applications โดน CASCADE ตามไปด้วย
+    // (notifications ตั้ง ON DELETE SET NULL ไว้ แจ้งเตือนเลยรอดจากการลบงาน — ดู db/008)
+    const [apps] = await db.query('SELECT caregiver_id FROM job_applications WHERE job_id = ?', [job.id]);
+    const affected = job.hire_type === 'direct' ? [job.target_caregiver_id] : apps.map((a) => a.caregiver_id);
+
     await db.query('DELETE FROM jobs WHERE id = ?', [job.id]);
+
+    await notifyMany(affected, {
+      jobId: null,   // งานถูกลบไปแล้ว ไม่มี id ให้อ้างถึงอีก
+      type: job.hire_type === 'direct' ? 'offer_withdrawn' : 'job_withdrawn',
+      title: job.hire_type === 'direct' ? 'คำขอจ้างถูกถอนกลับ' : 'ประกาศงานถูกถอนแล้ว',
+      body: `ผู้ว่าจ้างถอน "${job.title}" ออกจากระบบ`,
+    });
     return res.json({ ok: true, deleted: true });
   }
 
@@ -240,10 +317,23 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
   if (job.status === 'matched') {
     const reason = String(req.body.reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'ต้องบอกเหตุผลในการยกเลิกงานที่จับคู่แล้ว' });
+
     await db.query(
-      "UPDATE jobs SET status = 'cancelled', cancel_reason = ?, cancelled_by = ? WHERE id = ?",
+      `UPDATE jobs SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, status_changed_at = NOW()
+        WHERE id = ?`,
       [reason.slice(0, 500), req.user.id, job.id]
     );
+
+    // บอกอีกฝ่าย — คนที่กดยกเลิกเองไม่ต้องบอก เขาเพิ่งกดกับมือ
+    const otherSide = isEmployer
+      ? (job.assigned_caregiver_id || job.target_caregiver_id)
+      : job.employer_id;
+    await notify(otherSide, {
+      jobId: job.id,
+      type: 'job_cancelled',
+      title: 'งานถูกยกเลิก',
+      body: `"${job.title}" ถูกยกเลิกโดย${isEmployer ? 'ผู้ว่าจ้าง' : 'แคร์กิฟเวอร์'} — เหตุผล: ${reason.slice(0, 200)}`,
+    });
     return res.json({ ok: true, status: 'cancelled' });
   }
 
@@ -261,6 +351,16 @@ router.post('/:id/withdraw', requireAuth, async (req, res) => {
   if (app.status !== 'pending') return res.status(400).json({ error: 'คำขอนี้ถูกตัดสินไปแล้ว ถอนไม่ได้' });
 
   await db.query('DELETE FROM job_applications WHERE id = ?', [app.id]);
+
+  const [[job]] = await db.query('SELECT employer_id, title FROM jobs WHERE id = ?', [req.params.id]);
+  if (job) {
+    await notify(job.employer_id, {
+      jobId: Number(req.params.id),
+      type: 'application_withdrawn',
+      title: 'มีคนถอนคำขอรับงาน',
+      body: `${req.user.full_name} ถอนคำขอรับงาน "${job.title}"`,
+    });
+  }
   res.json({ ok: true });
 });
 

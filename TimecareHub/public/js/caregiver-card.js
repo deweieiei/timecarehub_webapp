@@ -26,7 +26,7 @@ async function viewCard() {
     : null;
 
   view.innerHTML = `
-    <button class="btn btn-ghost btn-sm" id="back" style="margin-bottom:14px">← กลับไปหาคนดูแล</button>
+    <button class="btn btn-ghost btn-sm" id="back" style="margin-bottom:14px">← กลับไปเลือกคนเอง</button>
 
     <div class="card cg-hero">
       ${avatar(c, { cls: 'avatar-xl' })}
@@ -95,12 +95,15 @@ async function viewCard() {
     // สีเขียนตรง ๆ ไม่ใช้ var(): Leaflet ยัดค่าลง attribute ของ SVG ซึ่ง var() ใช้ไม่ได้
     L.circle([c.lat, c.lng], {
       radius: c.service_radius_km * 1000,
-      color: '#0e7c86', weight: 1.5, dashArray: '6 6', fillColor: '#0e7c86', fillOpacity: .06, interactive: false,
+      color: '#0b6fa4', weight: 1.5, dashArray: '6 6', fillColor: '#0b6fa4', fillOpacity: .06, interactive: false,
     }).addTo(map);
+    // หมุดเป็นรูปคน ไม่ใช่ป้ายชื่อย่าน (UI ข้อ 1) — ให้ตรงกับหมุดในหน้าเลือกคนเอง
+    // ป้ายชื่อย่านทำให้เข้าใจผิดว่าเป็นที่อยู่บ้านเขา ทั้งที่หมายถึง "คนนี้รับงานแถวนี้"
+    const face = c.photo_url ? `<img src="${esc(c.photo_url)}" alt="">` : esc(initial(c.full_name));
     L.marker([c.lat, c.lng], {
       icon: L.divIcon({
         className: 'pin',
-        html: `<div class="pin-body"><div class="pin-label">${esc(c.area_label || c.full_name)}</div><div class="pin-tip"></div></div>`,
+        html: `<div class="pin-body" title="${esc(c.full_name)}"><div class="pin-photo">${face}</div><div class="pin-tip"></div></div>`,
         iconSize: [null, null], iconAnchor: [0, 0],
       }),
     }).addTo(map);

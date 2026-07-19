@@ -54,6 +54,8 @@ const ICONS = {
   briefcase: svg('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>'),
   browse: svg('<circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.3 2.7-5.4 6-5.4s6 2.1 6 5.4"/><circle cx="18" cy="9" r="2.4"/><path d="M17 14.8c2.4.3 4 2.2 4 5.2"/>'),
   hands: svg('<path d="M11 14h2a2 2 0 0 0 2-2 2 2 0 0 0-2-2H9.5L7 12"/><path d="M5 10 2 13l4 4 2-2"/><path d="M13 10h4a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-2"/><path d="M19 10l3 3-4 4-2-2"/>'),
+  bell: svg('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
+  clockFace: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),
 };
 
 // ---------- ตัวช่วย ----------
@@ -96,6 +98,39 @@ function toast(text, ms = 2800) {
   toast._t = setTimeout(() => t.classList.add('hide'), ms);
 }
 
+// ---------- แผ่นเด้งขึ้นจากขอบล่าง (ใช้ร่วมทุกหน้า) ----------
+// ของเดิมแต่ละที่ประกอบ backdrop เองหมด ทั้งปุ่มปิด ทั้ง Esc ทั้งกดพื้นหลัง — ซ้ำกัน 5 ที่
+// รวมไว้ที่เดียว: หน้าใหม่จะได้ไม่ลืมถอด listener ของ Esc แล้วมันค้างสะสม
+// คืน { root, close } — คนเรียกเอา root ไปผูกปุ่มข้างในต่อ
+function openSheet({ title, html, wide = false }) {
+  document.querySelector('.sheet-backdrop')?.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet ${wide ? 'sheet-wide' : ''}">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <h3>${title}</h3>
+        <button class="sheet-close" aria-label="ปิด">✕</button>
+      </div>
+      ${html}
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  const onEsc = (e) => { if (e.key === 'Escape') close(); };
+  function close() {
+    document.removeEventListener('keydown', onEsc);   // ไม่ถอด = เปิด-ปิดหลายรอบแล้ว listener ค้างสะสม
+    backdrop.remove();
+  }
+
+  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
+  backdrop.querySelector('.sheet-close').onclick = close;
+  document.addEventListener('keydown', onEsc);
+
+  return { root: backdrop, close };
+}
+
 // ---------- ยกเลิกงาน (ใช้ร่วมทั้งฝั่งผู้ว่าจ้างและแคร์กิฟเวอร์) ----------
 // ก่อนจับคู่ = ถอนทิ้ง ถามยืนยันเฉย ๆ ไม่ต้องมีเหตุผล ไม่เก็บประวัติ
 async function cancelBeforeMatch(jobId, confirmMsg, onDone) {
@@ -117,16 +152,88 @@ async function withdrawApplication(jobId, onDone) {
   } catch (e) { toast(e.message, 4200); }
 }
 
-// หลังจับคู่ = ต้องบอกเหตุผล → เก็บลงประวัติ (อีกฝ่ายเห็นเหตุผล)
-async function cancelAfterMatch(jobId, onDone) {
-  const reason = prompt('ยกเลิกงานนี้เพราะอะไร?\nอีกฝ่ายจะเห็นเหตุผลนี้ในประวัติ');
-  if (reason === null) return;                       // กด Cancel บน prompt
-  if (!reason.trim()) return toast('ต้องบอกเหตุผลในการยกเลิก');
-  try {
-    await api(`/api/jobs/${jobId}/cancel`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
-    toast('ยกเลิกงานแล้ว — ย้ายไปที่ประวัติ');
-    onDone?.();
-  } catch (e) { toast(e.message, 4200); }
+// เหตุผลสำเร็จรูปตอนยกเลิกงาน (ตกลงกับพี่ดิว ข้อ 5)
+// ทำไมต้องมีตัวเลือก: ของเดิมเป็นช่องเปล่า ๆ คนส่วนใหญ่พิมพ์ "ไม่สะดวก" คำเดียวจบ
+// ซึ่งอีกฝ่ายอ่านแล้วไม่ได้อะไรเลย — ให้กดเลือกเร็ว ๆ ได้ ข้อความจะมีเนื้อมากกว่า
+const CANCEL_REASONS = [
+  'ผู้สูงอายุเข้าโรงพยาบาล / อาการเปลี่ยนไป',
+  'หาผู้ดูแลจากที่อื่นได้แล้ว',
+  'เลื่อนวัน / เปลี่ยนแผนการดูแล',
+  'ตกลงเรื่องราคาหรือเวลากันไม่ได้',
+  'ติดต่ออีกฝ่ายไม่ได้',
+  'อีกฝ่ายผิดนัด / ไม่มาตามที่ตกลง',
+  'ติดธุระส่วนตัว ไม่สะดวกแล้ว',
+];
+
+// หลังจับคู่ = ต้องบอกเหตุผล → เก็บลงประวัติ (อีกฝ่ายเห็นเหตุผล + ได้แจ้งเตือน)
+// ใช้ร่วมกับตอนแคร์กิฟเวอร์ปฏิเสธคำขอจ้างด้วย (mode: 'decline') — เป็นคำถามเดียวกัน
+function cancelAfterMatch(jobId, onDone, { mode = 'cancel' } = {}) {
+  const isDecline = mode === 'decline';
+
+  const { root, close } = openSheet({
+    title: isDecline ? 'ปฏิเสธคำขอจ้าง' : 'ยกเลิกงานนี้',
+    html: `
+      <p class="hint" style="margin:2px 0 14px">
+        ${isDecline
+          ? 'บอกเหตุผลสั้น ๆ ให้ผู้ว่าจ้างรู้ (ไม่ใส่ก็ได้) — เขาจะได้ไม่ต้องเดา'
+          : 'อีกฝ่ายจะเห็นเหตุผลนี้ในประวัติ และได้รับแจ้งเตือนทันที'}
+      </p>
+
+      <div class="reason-list">
+        ${CANCEL_REASONS.map((r, i) => `
+          <label class="reason">
+            <input type="radio" name="reason" value="${esc(r)}" ${i === 0 && !isDecline ? 'checked' : ''}>
+            <span>${esc(r)}</span>
+          </label>`).join('')}
+        <label class="reason">
+          <input type="radio" name="reason" value="" data-other>
+          <span>อื่น ๆ — พิมพ์เอง</span>
+        </label>
+      </div>
+
+      <div class="field hide" id="reasonOtherWrap" style="margin-top:12px">
+        <textarea id="reasonOther" rows="3" maxlength="500" placeholder="พิมพ์เหตุผลของคุณ"></textarea>
+      </div>
+
+      <div class="sheet-actions">
+        <button class="btn btn-block ${isDecline ? '' : 'btn-danger'}" id="reasonGo">
+          ${isDecline ? 'ยืนยันการปฏิเสธ' : 'ยืนยันยกเลิกงาน'}
+        </button>
+      </div>`,
+  });
+
+  const otherWrap = $('#reasonOtherWrap', root);
+  const otherText = $('#reasonOther', root);
+
+  // เลือก "อื่น ๆ" ถึงจะโผล่ช่องพิมพ์ — โชว์ไว้ตลอดแล้วคนจะงงว่าต้องกรอกทั้งคู่ไหม
+  $$('input[name=reason]', root).forEach((r) => (r.onchange = () => {
+    const other = r.hasAttribute('data-other');
+    otherWrap.classList.toggle('hide', !other);
+    if (other) otherText.focus();
+  }));
+
+  $('#reasonGo', root).onclick = (e) => withSpin(e.currentTarget, async () => {
+    const picked = $('input[name=reason]:checked', root);
+    const reason = (picked?.hasAttribute('data-other') ? otherText.value : picked?.value || '').trim();
+
+    // ปฏิเสธไม่บังคับเหตุผล แต่ยกเลิกงานที่รับปากไปแล้วบังคับ (ฝั่ง server ก็บังคับซ้ำอีกชั้น)
+    if (!isDecline && !reason) return toast('เลือกเหตุผล หรือพิมพ์เองสักหน่อย');
+
+    try {
+      if (isDecline) {
+        await api(`/api/hires/${jobId}/respond`, {
+          method: 'POST',
+          body: JSON.stringify({ decision: 'decline', reason }),
+        });
+        toast('ปฏิเสธคำขอแล้ว');
+      } else {
+        await api(`/api/jobs/${jobId}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
+        toast('ยกเลิกงานแล้ว — ย้ายไปที่ประวัติ');
+      }
+      close();
+      onDone?.();
+    } catch (err) { toast(err.message, 4200); }
+  });
 }
 
 // ใครเป็นคนยกเลิกงาน — "คุณ" ถ้าเป็นตัวเราเอง ไม่งั้นบอกบทบาท (+ ชื่อถ้ามีในข้อมูลการ์ด)
@@ -149,6 +256,28 @@ function cancelReasonNote(j) {
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 const fmtBaht = (n) => Number(n).toLocaleString('th-TH');
 const fmtTime = (s) => new Date(s).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+// ---------- ช่วงวัน + เวลาทำงาน (ข้อ 3) ----------
+// คอลัมน์ TIME จาก MySQL กลับมาเป็น "08:00:00" — ตัดวินาทีทิ้ง คนอ่านไม่ได้สนใจ
+const fmtHm = (t) => (t ? String(t).slice(0, 5) : null);
+
+const fmtDate = (d) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+
+// คืนสตริงเดียวจบ เช่น "1 ส.ค. 68 – 30 ก.ย. 68 · 08:00-17:00 น."
+// ใช้ 4 ที่ (แผ่นงาน / แผ่นคำขอจ้าง / แผ่นในแชท / การ์ด) — เขียนซ้ำเมื่อไหร่มันจะเริ่มโชว์ไม่ตรงกัน
+function fmtPeriod(j) {
+  const days = [j.start_date, j.end_date].filter(Boolean).map(fmtDate).join(' – ');
+  const from = fmtHm(j.start_time);
+  const to = fmtHm(j.end_time);
+
+  // มีเวลาเข้าอย่างเดียวก็ยังบอกได้ ("เข้า 08:00 น.") — ดีกว่าเงียบไปเลย
+  const hours = from && to ? `${from}-${to} น.`
+    : from ? `เข้า ${from} น.`
+    : to ? `เลิก ${to} น.`
+    : '';
+
+  return [days, hours].filter(Boolean).join(' · ');
+}
 
 // ในห้องแชทวันที่ไปอยู่บนเส้นคั่นแล้ว ใต้ฟองเลยเหลือแค่เวลาพอ (ทุกฟองมีวันที่ติดมาด้วยมันรก)
 const fmtClock = (s) => new Date(s).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
@@ -303,14 +432,19 @@ async function buildFrame({ role, tabs = [], render = {} } = {}) {
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="/choose.html">
-          <span class="brand-mark">${ICONS.heart}</span>
+          <img class="brand-mark" src="/logo-mark.png" alt="" width="40" height="40">
           <span class="brand-text">
-            <strong>TimeCareHub</strong>
+            <strong>TIMECAREHUB</strong>
             <small>ดูแลผู้สูงอายุ ใกล้บ้านคุณ</small>
           </span>
         </a>
 
         <span class="spacer"></span>
+
+        <!-- กระดิ่งอยู่นอกเมนู 3 ขีดโดยตั้งใจ — ของที่มีเลขแดงต้องเห็นตลอด ไม่ใช่ซ่อนอยู่ในเมนู -->
+        <button class="icon-btn bell-btn" id="bellBtn" title="แจ้งเตือน" aria-label="แจ้งเตือน">
+          ${ICONS.bell}<span class="tab-badge hide" id="bellBadge"></span>
+        </button>
 
         <!-- จอกว้าง: โชว์เรียงกันบนหัว | จอแคบ: ยุบเข้าเมนู 3 ขีด -->
         <div class="header-actions" id="headerActions">
@@ -344,6 +478,8 @@ async function buildFrame({ role, tabs = [], render = {} } = {}) {
     await api('/api/auth/logout', { method: 'POST' });
     location.href = '/';
   });
+
+  $('#bellBtn').onclick = (e) => withSpin(e.currentTarget, () => openInbox());
 
   // เมนู 3 ขีด (จอแคบ)
   const toggle = $('#menuToggle');
@@ -389,7 +525,17 @@ function setMyPhoto(url) {
   if (el) el.innerHTML = url ? `<img src="${esc(url)}" alt="">` : esc(initial(ME.full_name));
 }
 
-// ---------- ตัวเลขแดง ๆ บนแท็บ ----------
+// ---------- ตัวเลขแดง ๆ บนแท็บ + กระดิ่ง ----------
+function paintBadge(el, count) {
+  if (!el) return;
+  if (count > 0) {
+    el.textContent = count > 9 ? '9+' : count;
+    el.classList.remove('hide');
+  } else {
+    el.classList.add('hide');
+  }
+}
+
 async function refreshBadges() {
   try {
     const n = await api(`/api/notifications?role=${ME.active_role}`);
@@ -402,16 +548,58 @@ async function refreshBadges() {
     };
 
     for (const [tab, count] of Object.entries(counts)) {
-      const el = document.querySelector(`[data-badge="${tab}"]`);
-      if (!el) continue;
-      if (count > 0) {
-        el.textContent = count > 9 ? '9+' : count;
-        el.classList.remove('hide');
-      } else {
-        el.classList.add('hide');
-      }
+      paintBadge(document.querySelector(`[data-badge="${tab}"]`), count);
     }
+    paintBadge($('#bellBadge'), n.alerts);
   } catch { /* เงียบไว้ ไม่ใช่เรื่องคอขาดบาดตาย */ }
+}
+
+// ============================================================
+//  กระดิ่งแจ้งเตือน (ข้อ 6)
+//  งานของฉันเปลี่ยนไปโดยที่ฉันไม่ได้เป็นคนทำ → มาโผล่ที่นี่
+// ============================================================
+const NOTIFY_ICON = {
+  job_cancelled: '🚫',
+  job_withdrawn: '🚫',
+  offer_withdrawn: '🚫',
+  offer_declined: '🙅',
+  job_not_chosen: '🙅',
+  application_withdrawn: '↩️',
+  job_matched: '🎉',
+  offer_accepted: '🎉',
+  offer_received: '📨',
+  job_applied: '🙋',
+  job_done: '✅',
+};
+
+async function openInbox() {
+  let items = [];
+  try {
+    ({ items } = await api('/api/notifications/list'));
+  } catch (e) {
+    return toast(e.message, 4200);
+  }
+
+  openSheet({
+    title: 'แจ้งเตือน',
+    html: items.length
+      ? `<div class="notif-list">${items.map((n) => `
+          <div class="notif ${n.read_at ? '' : 'new'}">
+            <span class="notif-icon">${NOTIFY_ICON[n.type] || '🔔'}</span>
+            <div>
+              <strong>${esc(n.title)}</strong>
+              ${n.body ? `<p>${esc(n.body)}</p>` : ''}
+              <time>${esc(fmtTime(n.created_at))}</time>
+            </div>
+          </div>`).join('')}</div>`
+      : emptyBox('ยังไม่มีแจ้งเตือน'),
+  });
+
+  // เปิดดูแล้ว = อ่านแล้วทั้งกอง — ยิงหลังวาดเสร็จ ไม่ต้องให้ผู้ใช้รอ
+  // (ล้มก็ไม่เป็นไร เลขแดงยังอยู่ เดี๋ยวเปิดใหม่แล้วลองอีกที)
+  api('/api/notifications/read', { method: 'POST' })
+    .then(() => paintBadge($('#bellBadge'), 0))
+    .catch(() => {});
 }
 
 function go(tab, render) {

@@ -90,29 +90,38 @@ router.get('/threads', requireAuth, async (req, res) => {
     : role === 'caregiver' ? 'j.target_caregiver_id = ?'
     : '(j.employer_id = ? OR j.target_caregiver_id = ?)';
 
+  // งานที่ปิดไปแล้วไม่ต้องโผล่ในรายการห้องอีก (ตกลงกับพี่ดิว ข้อ 10)
+  //   — ตกลงกันจบแล้ว คุยต่อไม่มีอะไรให้คุย ห้องค้างไว้มีแต่รกกับทำให้เผลอทักคนผิดงาน
+  //   ยกเลิก/ปฏิเสธไม่ได้ซ่อนด้วยโดยตั้งใจ: 2 กรณีนั้นมักมีเรื่องต้องเคลียร์กันต่อ
+  //   ข้อความเก่ายังอยู่ใน DB ครบ ไม่ได้ลบ — แค่ไม่โชว์ในรายการ
+  const ALIVE_JOB = "j.status <> 'done'";
+
   const [rows] = await db.query(
     `SELECT t.job_id, t.title, t.status, t.hire_type,
             u.id AS other_id, u.full_name AS other_name, u.last_seen_at AS other_last_seen,
             lm.kind AS last_kind, lm.body AS last_message,
             lm.sender_id AS last_sender, lm.created_at AS last_at,
+            -- ห้องที่ยังไม่มีข้อความ ใช้เวลาที่ห้องเกิดขึ้นแทน (ดู ORDER BY ข้างล่าง)
+            COALESCE(lm.created_at, t.opened_at) AS sort_at,
             (SELECT COUNT(*) FROM messages m
               WHERE m.job_id = t.job_id AND m.receiver_id = ? AND m.sender_id = t.other_id
                 AND m.read_at IS NULL) AS unread
        FROM (
          -- งานโพส: คู่สนทนามาจากตารางการกดขอรับงาน
-         SELECT j.id AS job_id, j.title, j.status, j.hire_type,
+         -- ห้องเกิดตอน "กดขอรับงาน" ไม่ใช่ตอนโพสงาน → ใช้ a.created_at
+         SELECT j.id AS job_id, j.title, j.status, j.hire_type, a.created_at AS opened_at,
                 IF(j.employer_id = ?, a.caregiver_id, j.employer_id) AS other_id
            FROM jobs j
            JOIN job_applications a ON a.job_id = j.id
-          WHERE j.hire_type = 'open' AND ${openWhere}
+          WHERE j.hire_type = 'open' AND ${ALIVE_JOB} AND ${openWhere}
 
          UNION
 
-         -- งานจ้างตรง: คู่สนทนาคือคู่ของงานนั้นเลย
-         SELECT j.id, j.title, j.status, j.hire_type,
+         -- งานจ้างตรง: คู่สนทนาคือคู่ของงานนั้นเลย ห้องเกิดพร้อมคำขอ
+         SELECT j.id, j.title, j.status, j.hire_type, j.created_at,
                 IF(j.employer_id = ?, j.target_caregiver_id, j.employer_id)
            FROM jobs j
-          WHERE j.hire_type = 'direct' AND ${directWhere}
+          WHERE j.hire_type = 'direct' AND ${ALIVE_JOB} AND ${directWhere}
        ) t
        JOIN users u ON u.id = t.other_id
        -- ข้อความล่าสุดของคู่นี้ (โชว์ใต้ชื่อในรายการห้อง)
@@ -123,7 +132,10 @@ router.get('/threads', requireAuth, async (req, res) => {
           ORDER BY m.created_at DESC, m.id DESC LIMIT 1
        )
       WHERE t.other_id <> ?
-      ORDER BY last_at IS NULL, last_at DESC`,
+      -- "แชทใหม่อยู่บน" (UI ข้อ 3): ห้องที่เพิ่งเปิดแต่ยังไม่มีใครทักต้องอยู่บนสุด ไม่ใช่ตกไปท้ายสุด
+      -- ของเดิม ORDER BY last_at IS NULL, last_at DESC ดันห้องเปล่าลงล่างเสมอ
+      -- ทั้งที่นั่นแหละคือห้องที่ต้องรีบเข้าไปทัก
+      ORDER BY sort_at DESC`,
     // ทุก ? ผูกกับ me ทั้งหมด — พอกรอง role แล้ว openWhere/directWhere เหลือ ? อย่างละ 1 (จากเดิม 2)
     Array(role ? 8 : 10).fill(me)
   );

@@ -39,6 +39,15 @@ function initRealtime() {
   socket.on('chat:typing', onTyping);
   socket.on('presence', onPresence);
 
+  // งานของฉันถูกยกเลิก/เปลี่ยนสถานะ (ข้อ 6) — เด้งให้เห็นทันที ไม่ต้องรอรอบ poll 15 วิ
+  // toast อย่างเดียวไม่พอ: เผลอมองไม่ทันแล้วหายไปเลย → เลขบนกระดิ่งต้องขึ้นด้วย
+  socket.on('notify', (n) => {
+    toast(`🔔 ${n.title}`, 5000);
+    refreshBadges();
+    // เปิดแท็บภารกิจ/แชทค้างอยู่ = รายการบนจอตอนนี้เก่าไปแล้ว วาดใหม่ให้เลย
+    if (TAB === 'chat' && !curChat) viewChat();
+  });
+
   // เน็ตหลุดแล้วกลับมา = ระหว่างนั้นอาจมีข้อความที่เราพลาดไป → ดึงห้องที่เปิดอยู่ใหม่
   socket.on('connect', () => {
     if (curChat) loadMsgs();
@@ -242,10 +251,7 @@ function openChatJobSheet(j) {
   document.querySelector('.sheet-backdrop')?.remove();
 
   const row = (k, v) => (v ? `<div class="sheet-row"><div class="k">${k}</div><div class="v">${v}</div></div>` : '');
-  const period = [j.start_date, j.end_date]
-    .filter(Boolean)
-    .map((d) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }))
-    .join(' – ');
+  const period = fmtPeriod(j);
 
   const backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
@@ -631,9 +637,16 @@ function sendText() {
 // ============================================================
 const MAX_SIDE = 1600;   // ด้านยาวสุดหลังย่อ — พอสำหรับดูบัตร/ใบยา/สภาพบ้าน ไม่ต้องใหญ่กว่านี้
 
+// ⚠️ ชื่อต้องไม่ชนกับ shrinkImage() ใน frame.js เด็ดขาด
+//    ทั้ง 2 ไฟล์เป็น <script> ธรรมดา ไม่ใช่ module → ประกาศชื่อเดียวกัน = ตัวที่โหลดทีหลังทับตัวแรก
+//    บั๊กที่เคยเกิด: caregiver.html โหลด frame.js แล้วตามด้วย chat.js → ตัวนี้ทับ
+//    แล้ว wirePhotoPicker() ใน frame.js ที่คาดว่าจะได้ Blob กลับได้ {blob,w,h} แทน
+//    → ถอยไปอัปไฟล์ต้นฉบับเต็ม ๆ → รูปจากมือถือชนลิมิต 8 MB หรือเป็น HEIC ที่ fileFilter ไม่รับ
+//    → "อัปรูปที่หน้าบัตรแคร์กิฟเวอร์ไม่ได้ แต่หน้าโปรไฟล์ได้" (profile.html ไม่ได้โหลด chat.js)
+//
 // ย่อรูปที่เครื่องคนส่งก่อนอัป — รูปจากมือถือใบละ 5-10 MB อัปตรงคือรอเป็นนาทีบนเน็ตบ้าน
 // ผลพลอยได้: canvas ทิ้ง EXIF ทั้งก้อน → พิกัด GPS ที่ฝังมากับรูปหลุดไปกับรูปไม่ได้
-async function shrinkImage(file) {
+async function shrinkChatImage(file) {
   if (typeof createImageBitmap !== 'function') return { blob: file };
 
   try {
@@ -681,7 +694,7 @@ async function sendImage(file) {
 
   const attempt = async () => {
     try {
-      const { blob, w, h } = await shrinkImage(file);
+      const { blob, w, h } = await shrinkChatImage(file);
 
       const fd = new FormData();
       fd.append('client_id', client_id);

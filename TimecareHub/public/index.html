@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-  <meta name="theme-color" content="#0e7c86">
-  <title>TimeCareHub — เข้าสู่ระบบ</title>
+  <meta name="theme-color" content="#0b6fa4">
+  <title>TIMECAREHUB — เข้าสู่ระบบ</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -16,8 +16,8 @@
   <div class="phone">
     <div class="auth">
       <div class="logo">
-        <img class="logo-img" src="/logo-mark.png" alt="TimeCareHub" width="96" height="96">
-        <h1>TimeCareHub</h1>
+        <img class="logo-img" src="/logo-mark.png" alt="TIMECAREHUB" width="112" height="112">
+        <h1>TIMECAREHUB</h1>
         <p>จับคู่ผู้ดูแลผู้สูงอายุ ใกล้บ้านคุณ</p>
       </div>
 
@@ -35,7 +35,10 @@
         </div>
         <div class="field">
           <label>รหัสผ่าน</label>
-          <input type="password" name="password" required autocomplete="current-password">
+          <div class="pw-wrap">
+            <input type="password" name="password" required autocomplete="current-password">
+            <button type="button" class="pw-eye" data-eye aria-label="แสดงรหัสผ่าน" title="แสดง/ซ่อนรหัสผ่าน">👁</button>
+          </div>
         </div>
         <button class="btn btn-block">เข้าสู่ระบบ</button>
       </form>
@@ -55,7 +58,18 @@
         </div>
         <div class="field">
           <label>รหัสผ่าน <span style="color:var(--muted);font-weight:400">(อย่างน้อย 8 ตัว)</span></label>
-          <input type="password" name="password" required minlength="8" autocomplete="new-password">
+          <div class="pw-wrap">
+            <input type="password" name="password" id="pw1" required minlength="8" autocomplete="new-password">
+            <button type="button" class="pw-eye" data-eye aria-label="แสดงรหัสผ่าน" title="แสดง/ซ่อนรหัสผ่าน">👁</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>ยืนยันรหัสผ่าน</label>
+          <div class="pw-wrap">
+            <input type="password" id="pw2" required minlength="8" autocomplete="new-password">
+            <button type="button" class="pw-eye" data-eye aria-label="แสดงรหัสผ่าน" title="แสดง/ซ่อนรหัสผ่าน">👁</button>
+          </div>
+          <p class="hint" id="pwHint">พิมพ์รหัสเดิมอีกครั้งเพื่อกันพิมพ์ผิด</p>
         </div>
         <button class="btn btn-block">สมัครสมาชิก</button>
       </form>
@@ -68,6 +82,7 @@
 
   <script>
     const $ = (s) => document.querySelector(s);
+    const $$ = (s) => [...document.querySelectorAll(s)];
     const msg = $('#msg');
 
     $('#tabLogin').onclick = () => switchTab(true);
@@ -81,11 +96,48 @@
       msg.innerHTML = '';
     }
 
+    // ---------- ปุ่มลืมตา: เปิดดูรหัสที่พิมพ์ไป ----------
+    // จำเป็นบนมือถือ: แป้นพิมพ์ไทย/อังกฤษสลับกันแล้วพิมพ์รหัสผิดโดยไม่รู้ตัว
+    // เห็นแค่ช่องของตัวเอง — ปุ่มแต่ละอันคุมเฉพาะ input ที่อยู่ในกล่องเดียวกัน
+    $$('[data-eye]').forEach((btn) => (btn.onclick = () => {
+      const input = btn.parentElement.querySelector('input');
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.textContent = show ? '🙈' : '👁';
+      btn.setAttribute('aria-label', show ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน');
+      input.focus();
+    }));
+
+    // ---------- ยืนยันรหัสผ่าน ----------
+    // ใช้ setCustomValidity แทนการเช็คตอนกดส่ง — เบราว์เซอร์จะเด้งบอกตรงช่องที่ผิดให้เอง
+    // และปุ่มสมัครจะกดไม่ผ่านจนกว่าจะตรงกัน (ไม่ต้องรอไปเจอ error หลังยิง API)
+    const pw1 = $('#pw1');
+    const pw2 = $('#pw2');
+    const pwHint = $('#pwHint');
+
+    function checkMatch() {
+      const same = pw1.value === pw2.value;
+      pw2.setCustomValidity(same ? '' : 'รหัสผ่านทั้งสองช่องไม่ตรงกัน');
+
+      // ยังพิมพ์ช่องที่ 2 ไม่เสร็จ อย่าเพิ่งขึ้นแดงใส่หน้าเขาตั้งแต่ตัวอักษรแรก
+      if (!pw2.value) {
+        pwHint.textContent = 'พิมพ์รหัสเดิมอีกครั้งเพื่อกันพิมพ์ผิด';
+        pwHint.style.color = '';
+        return;
+      }
+      pwHint.textContent = same ? '✓ รหัสผ่านตรงกัน' : '✕ รหัสผ่านยังไม่ตรงกัน';
+      pwHint.style.color = same ? 'var(--green)' : 'var(--red)';
+    }
+
+    pw1.oninput = checkMatch;
+    pw2.oninput = checkMatch;
+
     async function submit(form, url) {
+      const data = Object.fromEntries(new FormData(form));   // pw2 ไม่มี name → ไม่ถูกส่งขึ้น server
       const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+        body: JSON.stringify(data),
       });
       const j = await r.json();
       if (!r.ok) {
@@ -96,7 +148,11 @@
     }
 
     $('#loginForm').onsubmit = (e) => { e.preventDefault(); submit(e.target, '/api/auth/login'); };
-    $('#registerForm').onsubmit = (e) => { e.preventDefault(); submit(e.target, '/api/auth/register'); };
+    $('#registerForm').onsubmit = (e) => {
+      e.preventDefault();
+      if (pw1.value !== pw2.value) return;   // ตาข่ายชั้นสอง เผื่อ setCustomValidity ไม่ทำงาน
+      submit(e.target, '/api/auth/register');
+    };
   </script>
 </body>
 </html>

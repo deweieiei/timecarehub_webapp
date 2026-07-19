@@ -13,10 +13,14 @@
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
 
 // วาง HTML นี้ลงหน้าก่อน แล้วค่อยเรียก createPicker() ตอน element อยู่ใน DOM แล้ว
-const pickerBox = ({ id = 'pickMap', tall = false } = {}) => `
+//
+// person: true → หัวหมุดเป็นรูปคนแทนจุดขาว (UI ข้อ 1)
+//   ใช้ที่หน้าบัตรแคร์กิฟเวอร์ที่เดียว — ตรงนั้นหมุดหมายถึง "ตัวคุณรับงานแถวนี้" ไม่ใช่ "สถานที่"
+//   ล้อกับหมุดรูปหน้าคนที่ผู้ว่าจ้างเห็นในหน้าเลือกคนเอง จะได้เข้าใจตรงกันว่าหมุดนี้คือคน
+const pickerBox = ({ id = 'pickMap', tall = false, person = false } = {}) => `
   <div class="map-wrap pick-wrap">
-    <div id="${id}" class="${tall ? 'tall' : ''}"></div>
-    <div class="pick-pin" aria-hidden="true"></div>
+    <div id="${id}" class="pick-map ${tall ? 'tall' : ''}"></div>
+    <div class="pick-pin ${person ? 'person' : ''}" aria-hidden="true">${person ? ICONS.user : ''}</div>
     <button type="button" class="map-locate" data-locate title="ใช้ตำแหน่งของฉัน">
       <span>◎</span> ตำแหน่งของฉัน
     </button>

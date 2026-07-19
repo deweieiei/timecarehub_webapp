@@ -18,4 +18,14 @@ function ageFrom(birthDate) {
 // Leaflet ปักหมุดไม่ขึ้น และ .toFixed() พัง เพราะสตริงไม่มีเมธอดนั้น
 const num = (v) => (v == null ? null : Number(v));
 
-module.exports = { ageFrom, num };
+// เวลาจาก <input type="time"> มาเป็น "HH:MM" (บางเบราว์เซอร์แถมวินาทีมาเป็น "HH:MM:SS")
+// ไม่ตรงรูปแบบ = ถือว่าไม่ได้กรอก คืน null
+// ปล่อยค่าเพี้ยนลงคอลัมน์ TIME แล้ว MySQL จะเก็บ 00:00:00 ให้ ซึ่งอ่านทีหลังแยกไม่ออกเลย
+// ว่า "เข้างานเที่ยงคืน" หรือ "ไม่ได้กรอกเวลา"
+function readTime(v) {
+  if (v == null) return null;
+  const m = /^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(String(v).trim());
+  return m ? `${m[1]}:${m[2]}:00` : null;
+}
+
+module.exports = { ageFrom, num, readTime };

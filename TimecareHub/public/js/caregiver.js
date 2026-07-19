@@ -192,7 +192,7 @@ async function runSearch({ fit = false } = {}) {
     // ยังไม่ผ่าน KYC → เห็นแค่วงกลมคร่าว ๆ ไม่รู้ตำแหน่งจริง แต่ยังกดดูรายละเอียดได้
     if (!j.precise) {
       L.circle([j.lat, j.lng], {
-        radius: j.fuzz_radius_m, color: '#0e7c86', fillColor: '#0e7c86', fillOpacity: .16, weight: 1,
+        radius: j.fuzz_radius_m, color: '#0b6fa4', fillColor: '#0b6fa4', fillOpacity: .16, weight: 1,
       }).addTo(jobsLayer).on('click', () => openJobSheet(j));
     }
 
@@ -342,8 +342,12 @@ async function applyJob(jobId) {
 }
 
 // ==========================================================
-//  งานของฉัน — คำขอจ้างที่ส่งมาหา + งานที่ไปกดขอรับไว้
+//  ภารกิจของฉัน — คำขอจ้างที่ส่งมาหา + งานที่ไปกดขอรับไว้
 // ==========================================================
+
+// งานทุกใบของฉันรอบล่าสุด (id → งาน) — แผ่นรายละเอียดหยิบจากตรงนี้ ไม่ต้องยิง API ซ้ำ
+let ALL_MY_WORK = {};
+
 async function viewApplied() {
   const [{ items: offers }, { applied }] = await Promise.all([
     api('/api/hires/incoming'),
@@ -369,11 +373,12 @@ async function viewApplied() {
     ...applyHistory.map((j) => ({ at: j.created_at, html: appliedCard(j) })),
   ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
-  // เก็บ offer ทั้งหมดไว้เปิดแผ่นรายละเอียด (ปุ่ม "ดูรายละเอียดงาน") — ค้นด้วย id
-  const offerById = Object.fromEntries(offers.map((o) => [o.id, o]));
+  // เก็บงานทุกใบไว้เปิดแผ่นรายละเอียด รวมงานที่ยกเลิก/จบไปแล้ว (ข้อ 7)
+  // งานหนึ่งเป็นได้อย่างเดียว (จ้างตรง หรือ ประกาศ) → id ไม่มีทางชนกันระหว่าง 2 กอง
+  ALL_MY_WORK = Object.fromEntries([...offers, ...applied].map((j) => [j.id, j]));
 
   view.innerHTML = `
-    <h2>งานของฉัน</h2>
+    <h2>ภารกิจของฉัน</h2>
     <p class="sub">คำขอจ้างที่ส่งมาหาคุณ และงานที่คุณไปกดขอรับไว้</p>
 
     <h3 style="font-size:16px;margin:18px 0 10px">
@@ -392,11 +397,10 @@ async function viewApplied() {
     ` : ''}`;
 
   $$('[data-accept]', view).forEach((b) => (b.onclick = (e) => withSpin(e.currentTarget, () => respond(b.dataset.accept, 'accept'))));
-  $$('[data-decline]', view).forEach((b) => (b.onclick = (e) => {
-    if (!confirm('ปฏิเสธคำขอจ้างนี้?')) return;
-    withSpin(e.currentTarget, () => respond(b.dataset.decline, 'decline'));
-  }));
-  $$('[data-detail]', view).forEach((b) => (b.onclick = () => openOfferSheet(offerById[b.dataset.detail])));
+  // ปฏิเสธ = ถามเหตุผลด้วยแผ่นเดียวกับตอนยกเลิกงาน (ข้อ 5) — ไม่บังคับกรอก แต่มีให้เลือกเร็ว ๆ
+  $$('[data-decline]', view).forEach((b) => (b.onclick = () =>
+    cancelAfterMatch(b.dataset.decline, viewApplied, { mode: 'decline' })));
+  $$('[data-detail]', view).forEach((b) => (b.onclick = () => openOfferSheet(ALL_MY_WORK[b.dataset.detail])));
   // ถอนคำขอรับงาน (ก่อนผู้ว่าจ้างเลือก) — ไม่เก็บประวัติ
   $$('[data-withdraw]', view).forEach((b) => (b.onclick = (e) =>
     withSpin(e.currentTarget, () => withdrawApplication(b.dataset.withdraw, viewApplied))));
@@ -423,6 +427,7 @@ function appliedCard(j) {
 
   const isPending = j.my_application_status === 'pending' && j.status === 'open';
   const isWorking = j.my_application_status === 'accepted' && j.status === 'matched';
+  const period = fmtPeriod(j);
 
   return `
     <div class="job">
@@ -438,14 +443,16 @@ function appliedCard(j) {
       <div class="meta">
         <span class="chip">👤 ${esc(j.employer_name)}</span>
         <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
+        ${period ? `<span class="chip">🕒 ${esc(period)}</span>` : ''}
       </div>
       ${cancelReasonNote(j)}
-      ${(isPending || isWorking) ? `
-        <div class="job-actions">
-          ${isWorking ? `<button class="btn btn-sm btn-ghost" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>` : ''}
-          ${isPending ? `<button class="btn btn-sm btn-ghost" data-withdraw="${j.id}">ยกเลิกคำขอ</button>` : ''}
-          ${isWorking ? `<button class="btn btn-sm btn-ghost" data-cancel-job="${j.id}">ยกเลิกงาน</button>` : ''}
-        </div>` : ''}
+      <div class="job-actions">
+        <!-- ปุ่มนี้มีทุกสถานะ รวมงานที่ยกเลิก/จบไปแล้ว (ข้อ 7) -->
+        <button class="btn btn-sm btn-ghost" data-detail="${j.id}">ดูรายละเอียด</button>
+        ${isWorking ? `<button class="btn btn-sm btn-ghost" data-chatjob="${j.id}" data-other="${j.employer_id}">💬 คุยกับผู้ว่าจ้าง</button>` : ''}
+        ${isPending ? `<button class="btn btn-sm btn-ghost" data-withdraw="${j.id}">ยกเลิกคำขอ</button>` : ''}
+        ${isWorking ? `<button class="btn btn-sm btn-ghost" data-cancel-job="${j.id}">ยกเลิกงาน</button>` : ''}
+      </div>
     </div>`;
 }
 
@@ -467,7 +474,9 @@ function offerCard(j) {
 
       <div class="meta">
         <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
+        ${fmtPeriod(j) ? `<span class="chip">🕒 ${esc(fmtPeriod(j))}</span>` : ''}
         ${j.address ? `<span class="chip">📍 ${esc(j.address)}</span>` : ''}
+        ${j.lat != null ? '<span class="chip">🗺️ มีแผนที่</span>' : ''}
       </div>
       ${j.elder_condition ? `<p style="margin-top:10px;font-size:14px">${esc(j.elder_condition)}</p>` : ''}
       ${j.tasks ? `<p style="margin-top:4px;font-size:14px;color:var(--muted)">${esc(j.tasks)}</p>` : ''}
@@ -487,37 +496,28 @@ function offerCard(j) {
 }
 
 // ==========================================================
-//  แผ่นรายละเอียดคำขอจ้างตรง — เด้งขึ้นตอนกด "ดูรายละเอียดงาน"
-//  ปุ่มด้านล่างปรับตามสถานะ: รอตอบรับ → ตอบรับ/ปฏิเสธ, จับคู่แล้ว → คุยกับผู้ว่าจ้าง, จบแล้ว → ไม่มีปุ่ม
+//  แผ่นรายละเอียดงาน (ฝั่งแคร์กิฟเวอร์) — เด้งขึ้นตอนกด "ดูรายละเอียด"
+//
+//  ใช้ได้ทั้งคำขอจ้างตรงและงานที่ไปกดขอรับไว้ และทุกสถานะรวมงานที่ยกเลิก/จบแล้ว (ข้อ 7)
+//  ปุ่มด้านล่างปรับตามสถานะ: รอตอบรับ → ตอบรับ/ปฏิเสธ, จับคู่แล้ว → คุย/ยกเลิก, จบแล้ว → ไม่มีปุ่ม
 // ==========================================================
 function openOfferSheet(j) {
-  if (!j) return;
-  closeSheet();
+  if (!j) return toast('ไม่พบงานนี้');
 
   const row = (k, v) => (v ? `<div class="sheet-row"><div class="k">${k}</div><div class="v">${v}</div></div>` : '');
 
-  const period = [j.start_date, j.end_date]
-    .filter(Boolean)
-    .map((d) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }))
-    .join(' – ');
-
-  const isNew = j.status === 'offered';
+  const isDirect = j.hire_type === 'direct';
+  const isNew = isDirect && j.status === 'offered';
   const isMatched = j.status === 'matched';
+  const hasPin = j.lat != null && j.lng != null;
 
-  const backdrop = document.createElement('div');
-  backdrop.className = 'sheet-backdrop';
-  backdrop.innerHTML = `
-    <div class="sheet">
-      <div class="sheet-grip"></div>
-
-      <div class="sheet-head">
-        <h3>${esc(j.title)}</h3>
-        <button class="sheet-close" aria-label="ปิด">✕</button>
-      </div>
-
+  const { root, close } = openSheet({
+    title: esc(j.title),
+    html: `
       <div class="meta" style="margin-top:8px">
         <span class="badge badge-${j.status}">${STATUS_TH[j.status]}</span>
         <span class="chip">${CARE_TYPE_TH[j.care_type]}</span>
+        <span class="chip">${isDirect ? 'จ้างตรง' : 'งานที่ขอรับไว้'}</span>
       </div>
 
       <div class="sheet-price">
@@ -530,46 +530,56 @@ function openOfferSheet(j) {
       ${row('เบอร์ติดต่อ', isMatched && j.employer_phone ? esc(j.employer_phone) : (j.employer_phone ? '<span style="color:var(--muted)">ตอบรับงานก่อนถึงเห็นเบอร์</span>' : ''))}
       ${row('อาการผู้สูงอายุ', esc(j.elder_condition || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
       ${row('สิ่งที่ต้องทำ', esc(j.tasks || '') || '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
-      ${row('ช่วงเวลา', period || '<span style="color:var(--muted)">ยืดหยุ่น / ตกลงกันภายหลัง</span>')}
-      ${row('ตำแหน่ง', j.address ? `📍 ${esc(j.address)}` : '<span style="color:var(--muted)">ไม่ได้ระบุ</span>')}
-      ${j.status === 'cancelled' && j.cancel_reason
-        ? row('ยกเลิกโดย', `<span style="color:var(--red)">${cancelledByLabel(j) || '-'} — ${esc(j.cancel_reason)}</span>`) : ''}
+      ${row('วัน / เวลาทำงาน', esc(fmtPeriod(j)) || '<span style="color:var(--muted)">ยืดหยุ่น / ตกลงกันภายหลัง</span>')}
+      ${row('ตำแหน่ง', j.address ? `📍 ${esc(j.address)}` : (j.area_label ? `📍 ${esc(j.area_label)}` : '<span style="color:var(--muted)">ไม่ได้ระบุ</span>'))}
+      ${(j.status === 'cancelled' || j.status === 'declined') && j.cancel_reason
+        ? row(j.status === 'declined' ? 'เหตุผลที่ปฏิเสธ' : 'ยกเลิกโดย',
+            `<span style="color:var(--red)">${j.status === 'declined' ? '' : `${cancelledByLabel(j) || '-'} — `}${esc(j.cancel_reason)}</span>`) : ''}
+
+      ${hasPin ? `
+        <div style="margin-top:18px">
+          <h4 class="card-title">ตำแหน่งงานบนแผนที่</h4>
+          <p class="hint" style="margin:-6px 0 10px">ผู้ว่าจ้างปักหมุดไว้ — ดูก่อนว่าไปกลับไหวไหม</p>
+          <div class="map-wrap"><div id="offerMap"></div></div>
+        </div>` : ''}
 
       ${isNew ? `
-        <div class="sheet-actions">
-          <button class="btn btn-ghost" id="sheetDecline">ปฏิเสธ</button>
-          <button class="btn" id="sheetAccept">ตอบรับงาน</button>
+        <div class="sheet-actions" style="display:flex;gap:8px">
+          <button class="btn btn-ghost" id="sheetDecline" style="flex:1">ปฏิเสธ</button>
+          <button class="btn" id="sheetAccept" style="flex:1">ตอบรับงาน</button>
         </div>`
       : isMatched ? `
-        <div class="sheet-actions">
-          <button class="btn" id="sheetChat">💬 คุยกับผู้ว่าจ้าง</button>
-          <button class="btn btn-ghost" id="sheetCancel">ยกเลิกงาน</button>
+        <div class="sheet-actions" style="display:flex;gap:8px">
+          <button class="btn" id="sheetChat" style="flex:1">💬 คุยกับผู้ว่าจ้าง</button>
+          <button class="btn btn-ghost" id="sheetCancel" style="flex:1">ยกเลิกงาน</button>
         </div>`
-      : ''}
-    </div>`;
-
-  document.body.appendChild(backdrop);
-
-  // ปิดเมื่อกดพื้นหลัง / ปุ่มกากบาท / Esc
-  backdrop.onclick = (e) => { if (e.target === backdrop) closeSheet(); };
-  backdrop.querySelector('.sheet-close').onclick = closeSheet;
-  document.addEventListener('keydown', function onEsc(e) {
-    if (e.key === 'Escape') { closeSheet(); document.removeEventListener('keydown', onEsc); }
+      : ''}`,
   });
 
-  backdrop.querySelector('#sheetAccept')?.addEventListener('click', (e) =>
-    withSpin(e.currentTarget, async () => { await respond(j.id, 'accept'); closeSheet(); }));
-  backdrop.querySelector('#sheetDecline')?.addEventListener('click', (e) => {
-    if (!confirm('ปฏิเสธคำขอจ้างนี้?')) return;
-    withSpin(e.currentTarget, async () => { await respond(j.id, 'decline'); closeSheet(); });
-  });
-  backdrop.querySelector('#sheetChat')?.addEventListener('click', () => {
-    closeSheet();
+  $('#sheetAccept', root)?.addEventListener('click', (e) =>
+    withSpin(e.currentTarget, async () => { await respond(j.id, 'accept'); close(); }));
+
+  // ปฏิเสธ → เปิดแผ่นถามเหตุผลแทน (แผ่นใหม่จะแทนที่แผ่นนี้เอง — openSheet ลบของเก่าก่อนเสมอ)
+  $('#sheetDecline', root)?.addEventListener('click', () =>
+    cancelAfterMatch(j.id, viewApplied, { mode: 'decline' }));
+
+  $('#sheetChat', root)?.addEventListener('click', () => {
+    close();
     go('chat', CAREGIVER_VIEWS);
     setTimeout(() => openChat(j.id, j.employer_id), 250);
   });
-  backdrop.querySelector('#sheetCancel')?.addEventListener('click', (e) =>
-    withSpin(e.currentTarget, () => cancelAfterMatch(j.id, () => { closeSheet(); viewApplied(); })));
+  $('#sheetCancel', root)?.addEventListener('click', () => cancelAfterMatch(j.id, viewApplied));
+
+  if (!hasPin) return;
+
+  // รอแผ่นเลื่อนขึ้นให้นิ่งก่อน ไม่งั้น Leaflet วัดขนาดผิดแล้วแผนที่เทาครึ่งใบ
+  setTimeout(() => {
+    if (!root.isConnected) return;
+    const m = L.map('offerMap', { scrollWheelZoom: false }).setView([j.lat, j.lng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(m);
+    L.marker([j.lat, j.lng]).addTo(m);
+    m.invalidateSize();
+  }, 300);
 }
 
 async function respond(jobId, decision) {
@@ -616,6 +626,9 @@ async function viewKyc() {
     <form id="kycForm">
       <input type="hidden" name="lat" id="cardLat" value="${hasPin ? p.lat : ''}">
       <input type="hidden" name="lng" id="cardLng" value="${hasPin ? p.lng : ''}">
+      <!-- ชื่อย่านไม่ให้กรอกเองแล้ว (UI ข้อ 1) — อ่านจากหมุดให้อัตโนมัติ
+           ของเดิมเป็นช่องกรอก แล้วคนพิมพ์ชื่อย่านที่ไม่ตรงกับหมุด ผู้ว่าจ้างเลยอ่านการ์ดแล้วสับสน -->
+      <input type="hidden" name="area_label" id="cardArea" value="${esc(p.area_label || '')}">
 
       <div class="card">
         <h3 class="card-title">รูปโปรไฟล์</h3>
@@ -673,22 +686,15 @@ async function viewKyc() {
         </div>
 
         <p id="cardPinInfo" class="hint" style="margin-bottom:10px">เลื่อน/ซูมแผนที่ให้หมุดกลางจอตรงย่านที่จะรับงาน</p>
-        ${pickerBox()}
+        ${pickerBox({ person: true })}
 
-        <div class="row" style="margin-top:14px;align-items:flex-end">
-          <div class="field" style="margin:0">
-            <label>ยอมเดินทางไกลแค่ไหน</label>
-            <select name="service_radius_km" id="cardRadius">
-              ${[5, 10, 20, 30, 50].map((r) =>
-                `<option value="${r}" ${(p.service_radius_km || 10) === r ? 'selected' : ''}>ในรัศมี ${r} กม. จากหมุด</option>`).join('')}
-            </select>
-            <p class="hint">ผู้ว่าจ้างที่หาคนไกลกว่านี้จะไม่เจอคุณ</p>
-          </div>
-          <div class="field" style="margin:0">
-            <label>ชื่อย่าน</label>
-            <input name="area_label" id="cardArea" value="${esc(p.area_label || '')}" placeholder="ลาดพร้าว">
-            <p class="hint">ระบบอ่านจากหมุดให้ — แก้เองได้</p>
-          </div>
+        <div class="field" style="margin:14px 0 0">
+          <label>ยอมเดินทางไกลแค่ไหน</label>
+          <select name="service_radius_km" id="cardRadius">
+            ${[5, 10, 20, 30, 50].map((r) =>
+              `<option value="${r}" ${(p.service_radius_km || 10) === r ? 'selected' : ''}>ในรัศมี ${r} กม. จากหมุด</option>`).join('')}
+          </select>
+          <p class="hint">ผู้ว่าจ้างที่หาคนไกลกว่านี้จะไม่เจอคุณ</p>
         </div>
       </div>
 
@@ -732,7 +738,7 @@ async function viewKyc() {
   };
 }
 
-// ---------- หมุดขยับ: จำพิกัด + เติมชื่อย่านให้ ----------
+// ---------- หมุดขยับ: จำพิกัด + อ่านชื่อย่านให้อัตโนมัติ ----------
 function onCardPinMoved({ lat, lng, area, loading }) {
   $('#cardLat').value = lat;
   $('#cardLng').value = lng;
@@ -740,9 +746,9 @@ function onCardPinMoved({ lat, lng, area, loading }) {
     ? `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} — กำลังอ่านชื่อย่าน…`
     : `📍 ${area || 'ตำแหน่งนี้'} · ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-  // เติมชื่อย่านให้เฉพาะตอนช่องยังว่าง — ผู้ใช้พิมพ์เองแล้วห้ามไปทับ
-  const areaInput = $('#cardArea');
-  if (!loading && area && areaInput && !areaInput.value.trim()) areaInput.value = area;
+  // ชื่อย่านผูกกับหมุดเสมอ — ย้ายหมุดแล้วชื่อย่านต้องเปลี่ยนตาม (UI ข้อ 1)
+  // อ่านไม่ออก (Nominatim ล่ม) ให้คงชื่อเดิมไว้ ดีกว่าล้างทิ้งจนการ์ดขึ้นว่า "ไม่ระบุย่าน"
+  if (!loading && area) $('#cardArea').value = area;
 }
 
 // ---------- วงรัศมีที่ยอมเดินทาง ----------
@@ -760,8 +766,8 @@ function drawServiceRing() {
   // ซึ่ง var() ใช้ใน presentation attribute ไม่ได้ → เส้นจะกลายเป็นสีดำ
   serviceRing = L.circle(at, {
     radius,
-    color: '#0e7c86', weight: 1.5, dashArray: '6 6',
-    fillColor: '#0e7c86', fillOpacity: .06,
+    color: '#0b6fa4', weight: 1.5, dashArray: '6 6',
+    fillColor: '#0b6fa4', fillOpacity: .06,
     interactive: false,
   }).addTo(cardPicker.map);
 }
@@ -794,6 +800,6 @@ const CAREGIVER_VIEWS = { find: viewFind, applied: viewApplied, chat: viewChat, 
 buildFrame({
   role: 'caregiver',
   // แท็บใช้ชื่อสั้น (จอมือถือมี 4 แท็บ ยาวกว่านี้ล้น) — ชื่อเต็มอยู่ที่หัวข้อในหน้า
-  tabs: [['find', 'หางาน'], ['applied', 'งานของฉัน'], ['chat', 'แชท'], ['kyc', 'บัตรแคร์กิฟเวอร์']],
+  tabs: [['find', 'หางาน'], ['applied', 'ภารกิจของฉัน'], ['chat', 'แชท'], ['kyc', 'บัตรแคร์กิฟเวอร์']],
   render: CAREGIVER_VIEWS,
 });

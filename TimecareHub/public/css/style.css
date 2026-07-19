@@ -1,9 +1,31 @@
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
 
 :root {
-  --teal: #0e7c86;
-  --teal-dark: #0a5c64;
-  --teal-light: #e6f4f5;
+  /* ============================================================
+     สีแพลตฟอร์ม — ไล่เฉดจากฟ้าใน logo (#4FC4FF)
+     ============================================================
+     logo เองก็ไล่เฉดฟ้าอ่อน→ฟ้าเข้มอยู่แล้ว เอาช่วงเดียวกันนั้นมาใช้ทั้งเว็บ
+
+     ⚠️ #4FC4FF สว่างเกินกว่าจะเอาไปเป็นพื้นหลังของตัวหนังสือสีขาว
+        (contrast ~1.9:1 — อ่านไม่ออกกลางแดด และตกมาตรฐาน WCAG ขาดลอย)
+        → ฟ้าตัวนี้ใช้เป็น "สีเน้น/ไฮไลต์" เท่านั้น
+          ส่วนพื้นหลังที่มีตัวหนังสือขาวทับ (หัวเว็บ ปุ่ม ฟองแชท) ใช้ --brand-mid / --brand-dark */
+  --brand: #4fc4ff;        /* ฟ้า logo ตัวจริง — เส้นขอบ ไฮไลต์ วงโฟกัส จุดเน้น */
+  --brand-mid: #1795d6;    /* ต้นไล่เฉดหัวเว็บ */
+  --brand-dark: #0b6fa4;   /* พื้นทึบที่มีตัวหนังสือขาวทับ (ขาวบนนี้ ~6.2:1 ผ่าน AA สบาย) */
+  --brand-deep: #085a87;   /* ตอน hover + ปลายไล่เฉด */
+  --brand-light: #e8f7ff;  /* พื้นอ่อนของกล่องข้อความ/ปุ่มโกสต์ตอน hover */
+
+  /* ชื่อเดิมยังใช้ได้ — โค้ดอ้าง var(--teal) อยู่ร่วมร้อยจุด
+     ชี้มาที่สีใหม่ทีเดียวจบ ไม่ต้องไล่แก้ทุกไฟล์แล้วพลาดสักจุด
+     (จุดที่เขียนสีตรง ๆ ไม่ได้ใช้ var — คือ Leaflet — แก้แยกในไฟล์ JS แล้ว)
+     ชี้ไปที่ --brand-dark ไม่ใช่ --brand: var(--teal) ถูกใช้ 2 หน้าที่พร้อมกัน
+     ทั้งเป็นพื้นของตัวหนังสือขาว (.btn, .msg.me) และเป็นสีตัวหนังสือบนพื้นขาว (.btn-ghost)
+     ฟ้าอ่อน #4FC4FF ตกทั้ง 2 ทาง ต้องใช้เฉดเข้มถึงจะอ่านออกทั้งคู่ */
+  --teal: var(--brand-dark);
+  --teal-dark: var(--brand-deep);
+  --teal-light: var(--brand-light);
+
   --amber: #f59e0b;
   --amber-dark: #d97706;
   --ink: #111827;
@@ -40,10 +62,12 @@ body {
    กรอบ — Site header (ใช้ทุกหน้าที่ล็อกอินแล้ว)
    ============================================================ */
 .site-header {
-  background: linear-gradient(135deg, var(--teal) 0%, var(--teal-dark) 100%);
+  /* ไล่เฉดฟ้าอ่อน→ฟ้าเข้ม ล้อกับตัว logo — เริ่มที่ --brand-mid ไม่ใช่ --brand-dark
+     จะได้เห็นความเป็นฟ้าของแบรนด์ ไม่ใช่แถบน้ำเงินทึบ ๆ */
+  background: linear-gradient(135deg, var(--brand-mid) 0%, var(--brand-deep) 100%);
   color: #fff;
   flex-shrink: 0;
-  box-shadow: 0 2px 12px rgba(10, 92, 100, .18);
+  box-shadow: 0 2px 12px rgba(11, 111, 164, .22);
   position: relative;
   z-index: 800;
 }
@@ -65,14 +89,16 @@ body {
 .menu-toggle.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; }
+/* โลโก้จริงบนหัวเว็บ — พื้นขาวกลม เพราะตัว logo เป็นฟ้าบนพื้นใส
+   วางบนหัวเว็บสีฟ้าตรง ๆ แล้วหัวใจจะจมหายไปกับพื้นหลัง */
 .brand-mark {
   width: 40px; height: 40px; flex-shrink: 0;
-  background: rgba(255, 255, 255, .18);
-  border-radius: 12px; display: grid; place-items: center;
+  background: #fff; border-radius: 50%;
+  padding: 3px; object-fit: contain;
 }
-.brand-mark svg { width: 22px; height: 22px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.25; }
-.brand-text strong { font-size: 18px; letter-spacing: -.3px; }
+/* TIMECAREHUB ตัวพิมพ์ใหญ่ล้วน — ต้องเพิ่มระยะห่างตัวอักษร ไม่งั้นอ่านเป็นก้อนเดียว */
+.brand-text strong { font-size: 17px; letter-spacing: .6px; font-weight: 700; }
 .brand-text small { font-size: 11px; opacity: .8; }
 
 .user-bar { display: flex; align-items: center; gap: 9px; }
@@ -290,7 +316,7 @@ h2 { font-size: 21px; font-weight: 700; letter-spacing: -.3px; }
   border-radius: 50%; animation: btnSpin .6s linear infinite;
 }
 /* ปุ่มพื้นขาว (ghost/amber-ghost) วงหมุนต้องเป็นสีเทียล ไม่งั้นขาวบนขาวมองไม่เห็น */
-.btn-ghost.loading::after { border-color: rgba(14, 124, 134, .25); border-top-color: var(--teal); }
+.btn-ghost.loading::after { border-color: rgba(27, 159, 224, .25); border-top-color: var(--teal); }
 @keyframes btnSpin { to { transform: rotate(360deg); } }
 
 /* ============================================================
@@ -305,7 +331,7 @@ input, textarea, select {
 }
 input:focus, textarea:focus, select:focus {
   outline: 0; border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(14, 124, 134, .12);
+  box-shadow: 0 0 0 3px rgba(79, 196, 255, .28);
 }
 input[type=file] { padding: 10px; font-size: 14px; }
 .field { margin-bottom: 14px; }
@@ -330,13 +356,31 @@ input[type=file] { padding: 10px; font-size: 14px; }
   width: 78px; height: 78px; margin: 0 auto 14px;
   background: linear-gradient(135deg, var(--teal), var(--teal-dark));
   border-radius: 22px; display: grid; place-items: center;
-  box-shadow: 0 10px 26px rgba(14, 124, 134, .32);
+  box-shadow: 0 10px 26px rgba(27, 159, 224, .32);
 }
 .auth .logo-mark svg { width: 40px; height: 40px; color: #fff; }
-/* โลโก้จริง (หัวใจ) บนหน้า login — ไม่ต้องมีกล่องเทียลครอบ */
-.auth .logo-img { display: block; width: 96px; height: 96px; margin: 0 auto 12px; object-fit: contain; }
-.auth .logo h1 { font-size: 27px; font-weight: 700; letter-spacing: -.5px; }
-.auth .logo p { color: var(--muted); font-size: 14px; }
+/* โลโก้จริง (หัวใจ) บนหน้า login — ไม่ต้องมีกล่องสีครอบ */
+.auth .logo-img { display: block; width: 112px; height: 112px; margin: 0 auto 10px; object-fit: contain; }
+/* TIMECAREHUB ตัวใหญ่ล้วน — ต้องกางตัวอักษรออก ไม่ใช่บีบเข้าแบบตัวพิมพ์เล็กผสมใหญ่
+   และไล่เฉดฟ้าเดียวกับ logo ให้ตัวหนังสือกับรูปเป็นชิ้นเดียวกัน */
+.auth .logo h1 {
+  font-size: 27px; font-weight: 700; letter-spacing: 2.5px;
+  background: linear-gradient(100deg, var(--brand) 0%, var(--brand-dark) 70%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: var(--brand-dark);
+}
+.auth .logo p { color: var(--muted); font-size: 14px; margin-top: 2px; }
+
+/* ---------- ช่องรหัสผ่าน + ปุ่มลืมตา ---------- */
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 46px; }   /* เว้นที่ให้ปุ่ม ไม่ให้ตัวหนังสือมุดไปใต้ตา */
+.pw-eye {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 38px; height: 38px; border: 0; border-radius: 50%;
+  background: none; cursor: pointer; font-size: 17px; line-height: 1;
+  display: grid; place-items: center; opacity: .65;
+}
+.pw-eye:hover { background: var(--bg); opacity: 1; }
 
 .tabs { display: flex; background: #fff; border-radius: 12px; padding: 4px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
 .tabs button {
@@ -378,10 +422,14 @@ input[type=file] { padding: 10px; font-size: 14px; }
 /* ============================================================
    แผนที่
    ============================================================ */
-#map, #pickMap, #cardMap { height: 340px; border-radius: var(--r); z-index: 1; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-#pickMap { height: 260px; }
-#pickMap.tall { height: 320px; }   /* หน้าหาคนดูแล: หมุด+วงรัศมี+หมุดคน อยู่บนแผนที่เดียวกัน ต้องสูงขึ้น */
-#cardMap { height: 240px; }
+/* แผนที่ทุกใบใช้คลาส ไม่ใช่ id — มีแผนที่หลายใบต่อหน้าแล้ว (แผ่นจ้าง/แผ่นรายละเอียด/บัตร)
+   ผูกกับ id ทีไรก็ต้องมาเพิ่มบรรทัดใหม่ทุกครั้งที่มีแผนที่เพิ่ม แล้ววันหนึ่งจะลืมจนแผนที่สูง 0px */
+#map, .pick-map, #cardMap, #jobDetailMap, #offerMap {
+  height: 340px; border-radius: var(--r); z-index: 1; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.pick-map { height: 260px; }
+.pick-map.tall { height: 320px; }   /* หน้าเลือกคนเอง: หมุด+วงรัศมี+หมุดคน อยู่บนแผนที่เดียวกัน ต้องสูงขึ้น */
+#cardMap, #jobDetailMap, #offerMap { height: 240px; }
 .leaflet-container { font-family: 'Sarabun', sans-serif; }
 .leaflet-control-attribution { font-size: 9px; }
 
@@ -414,6 +462,16 @@ input[type=file] { padding: 10px; font-size: 14px; }
 }
 /* ยกหมุดตอนกำลังเลื่อนแผนที่ */
 .pick-pin.lift { transform: translateY(-7px); }
+
+/* หมุดแบบ "ตัวคน" (UI ข้อ 1) — ใช้ที่บัตรแคร์กิฟเวอร์
+   ที่นั่นหมุดหมายถึงตัวคุณ ไม่ใช่สถานที่ → เอาไอคอนคนแทนจุดขาว
+   ตัว ::before (หัวหมุด) หมุน -45° อยู่ แต่ svg เป็นลูกคนละตัว เลยไม่หมุนตาม */
+.pick-pin.person::after { display: none; }
+.pick-pin.person svg {
+  position: absolute; left: 50%; top: 6px;
+  width: 17px; height: 17px; margin-left: -8.5px;
+  color: #fff; z-index: 1;
+}
 
 /* เงาใต้หมุด — เล็งจุดกึ่งกลางได้ตอนหมุดลอย */
 .pick-wrap::after {
@@ -559,6 +617,9 @@ input[type=file] { padding: 10px; font-size: 14px; }
   .sheet { border-radius: 22px; max-height: 86dvh; }
 }
 
+/* แผ่นที่มีฟอร์มยาว ๆ (ส่งคำขอจ้าง) — ให้สูงได้มากกว่าปกติ ไม่งั้นต้องเลื่อนในกล่องเล็ก ๆ */
+.sheet-wide { max-height: 90dvh; }
+
 .sheet-grip {
   width: 42px; height: 5px; background: var(--line);
   border-radius: 999px; margin: 4px auto 14px;
@@ -664,7 +725,7 @@ input[type=file] { padding: 10px; font-size: 14px; }
 .ticks { display: inline-flex; opacity: .7; }
 .ticks svg { width: 14px; height: 14px; }
 .ticks.pending svg { width: 11px; height: 11px; }
-.ticks.read { opacity: 1; color: #7fe3f0; }   /* ฟ้าสว่างบนพื้นเขียว = อ่านแล้ว เห็นชัดกว่าขาวจาง */
+.ticks.read { opacity: 1; color: var(--brand); }   /* ฟ้า logo บนพื้นน้ำเงินเข้ม = อ่านแล้ว เห็นชัดกว่าขาวจาง */
 .ticks.failed { opacity: 1; color: #ffe0e0; }
 .ticks.failed svg { width: 13px; height: 13px; }
 
@@ -695,7 +756,46 @@ input[type=file] { padding: 10px; font-size: 14px; }
 .chat-input .btn svg { width: 20px; height: 20px; }
 
 /* ============================================================
-   แจ้งเตือน
+   กระดิ่งแจ้งเตือน (ข้อ 6)
+   ============================================================ */
+/* กระดิ่งไม่ยุบเข้าเมนู 3 ขีดเหมือนปุ่มอื่น — ของที่มีเลขแดงต้องเห็นตลอด */
+.bell-btn { position: relative; overflow: visible; }
+.bell-btn .tab-badge { top: -3px; right: -3px; }
+
+.notif-list { margin-top: 8px; }
+.notif {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 4px; border-top: 1px solid var(--line);
+}
+.notif:first-child { border-top: 0; }
+/* ยังไม่ได้เปิดอ่าน — พื้นฟ้าจาง + ขีดซ้าย ให้กวาดตาเจอว่าอันไหนของใหม่ */
+.notif.new {
+  background: var(--brand-light);
+  border-radius: 10px; padding-left: 10px;
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.notif-icon { font-size: 19px; line-height: 1.3; flex-shrink: 0; }
+.notif strong { display: block; font-size: 14.5px; }
+.notif p { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+.notif time { display: block; font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
+/* ============================================================
+   ตัวเลือกเหตุผลตอนยกเลิก/ปฏิเสธ (ข้อ 5)
+   ============================================================ */
+.reason-list { display: flex; flex-direction: column; gap: 2px; }
+.reason {
+  display: flex; align-items: center; gap: 11px;
+  margin: 0; padding: 11px 12px; border-radius: 11px;
+  font-weight: 500; font-size: 14.5px; cursor: pointer;
+  border: 1.5px solid transparent; transition: .13s;
+}
+.reason:hover { background: var(--bg); }
+.reason input { width: 19px; height: 19px; flex: 0 0 auto; accent-color: var(--brand-mid); cursor: pointer; }
+/* :has() ให้ทั้งแถบเปลี่ยนสีตอนเลือก ไม่ใช่แค่วงกลมเล็ก ๆ — เบราว์เซอร์เก่าที่ไม่รู้จักก็แค่ไม่ไฮไลต์ ยังกดได้ปกติ */
+.reason:has(input:checked) { background: var(--brand-light); border-color: var(--brand); }
+
+/* ============================================================
+   แจ้งเตือน (กล่องข้อความในหน้า)
    ============================================================ */
 .alert { padding: 13px 15px; border-radius: 12px; margin-bottom: 14px; font-size: 14px; }
 .alert-warn { background: #fef3c7; color: #92400e; }

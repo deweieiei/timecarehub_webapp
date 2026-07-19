@@ -232,4 +232,10 @@ function emitToBoth(a, b, event, payload) {
   if (io) toBoth(a, b, event, payload);
 }
 
-module.exports = { init, isOnline, emitToBoth };
+// ยิงหาคนเดียว (ทุกแท็บที่เขาเปิดอยู่) — ใช้ส่งแจ้งเตือนงาน (src/notify.js)
+// เขาไม่ได้เปิดเว็บอยู่ก็ไม่เป็นไร ของจริงบันทึกลง DB แล้ว เดี๋ยวเปิดมาก็เห็น
+function emitTo(userId, event, payload) {
+  if (io && userId) io.to(room(userId)).emit(event, payload);
+}
+
+module.exports = { init, isOnline, emitToBoth, emitTo };
