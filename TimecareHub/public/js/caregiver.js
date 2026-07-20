@@ -144,8 +144,10 @@ function drawRing() {
 
   radiusRing = L.circle(pinLatLng, {
     radius: Number($('#radius').value) * 1000,
-    color: '#b06305', weight: 1.5, dashArray: '6 6',
-    fillColor: '#f5a524', fillOpacity: .06,
+    // ฟ้าเข้มสุด = เฉดเดียวกับหมุดที่ผู้ใช้ปักเอง (--blue-deep) วงกับหมุดจะได้เป็นชุดเดียวกัน
+    // (สีเขียนตรง ๆ ไม่ใช้ var(): Leaflet ยัดค่านี้ลง attribute ของ SVG ซึ่ง var() ใช้ไม่ได้)
+    color: '#085a87', weight: 1.5, dashArray: '6 6',
+    fillColor: '#0b6fa4', fillOpacity: .07,
     interactive: false,   // ต้องปิด ไม่งั้นวงรัศมีบังคลิกวางหมุดทั้งแผนที่
   }).addTo(map);
 }
